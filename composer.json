@@ -3,7 +3,7 @@
     "type": "php-ext",
     "description": "Native phonetic matching for PHP: Double Metaphone, Beider-Morse Phonetic Matching, and Daitch-Mokotoff Soundex.",
     "keywords": ["phonetic", "double-metaphone", "metaphone", "beider-morse", "bmpm", "daitch-mokotoff", "soundex", "fuzzy-matching", "php-extension", "pie"],
-    "license": "BSD-3-Clause",
+    "license": ["BSD-3-Clause", "Apache-2.0"],
     "homepage": "https://github.com/iliaal/phonetic",
     "authors": [
         {
