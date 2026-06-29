@@ -25,5 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to prevent a native stack-overflow crash on crafted deeply-nested input.
 - `bmpm()`: size the word buffers to the input instead of a fixed 64, so names
   with more than 64 words no longer silently drop the excess.
+- `bmpm()`: lowercase Cyrillic-script input so raw Cyrillic names (e.g. `Иванов`)
+  match Commons Codec. Greek script remains a known limitation (final-sigma).
 
 [Unreleased]: https://github.com/iliaal/phonetic/commits/master

@@ -163,6 +163,16 @@ static uint32_t lc_cp(uint32_t c)
 	if (c >= 0x014A && c <= 0x0177) return (c & 1u) ? c : c + 1;
 	if (c == 0x0178) return 0x00FF;                 /* Y-diaeresis */
 	if (c >= 0x0179 && c <= 0x017E) return (c & 1u) ? c + 1 : c;
+	/* Cyrillic. Greek is intentionally not handled: its context-sensitive
+	 * final-sigma needs positional logic this point-wise map can't express,
+	 * so raw Greek-script input remains a known limitation. */
+	if (c >= 0x0410 && c <= 0x042F) return c + 0x20;   /* \u0410-\u042F -> \u0430-\u044F */
+	if (c >= 0x0400 && c <= 0x040F) return c + 0x50;   /* incl. YO (U+0401) */
+	if (c >= 0x0460 && c <= 0x0481) return (c & 1u) ? c : c + 1;
+	if (c >= 0x048A && c <= 0x04BF) return (c & 1u) ? c : c + 1;
+	if (c == 0x04C0) return 0x04CF;
+	if (c >= 0x04C1 && c <= 0x04CE) return (c & 1u) ? c + 1 : c;
+	if (c >= 0x04D0 && c <= 0x052F) return (c & 1u) ? c : c + 1;
 	return c;
 }
 

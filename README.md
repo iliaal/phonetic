@@ -44,6 +44,16 @@ dm_soundex("Auerbach");                    // ['097400', '097500']
 dm_soundex("Peters");                      // ['734000', '739400']
 ```
 
+## Notes & limitations
+
+- Input is UTF-8. `bmpm()` and `dm_soundex()` fold accented Latin and lowercase both
+  Latin and Cyrillic script before rule matching, so raw `Иванов` encodes correctly.
+- **Greek-script input is a known limitation:** Greek capitals are not lowercased
+  (the algorithm's context-sensitive final-sigma cannot be expressed by a point-wise
+  case map), so pass Greek names already lowercased or romanized.
+- `double_metaphone()` targets ASCII/Latin; non-letter bytes are skipped, matching
+  Apache Commons Codec.
+
 ## Install
 
 Via [PIE](https://github.com/php/pie):
