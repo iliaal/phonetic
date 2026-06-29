@@ -1,5 +1,5 @@
 /* This is a generated file, edit phonetic.stub.php instead.
- * Stub hash: 0cf29e9fc875c88f6a0de3f086a8a99120c04d83 */
+ * Stub hash: ecc456faf61aa4b05a09503ebaa51d6215661505 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_double_metaphone, 0, 1, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
@@ -13,11 +13,17 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_bmpm, 0, 1, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, language, IS_STRING, 0, "\"\"")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_dm_soundex, 0, 1, IS_ARRAY, 0)
+	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_FUNCTION(double_metaphone);
 ZEND_FUNCTION(bmpm);
+ZEND_FUNCTION(dm_soundex);
 
 static const zend_function_entry ext_functions[] = {
 	ZEND_FE(double_metaphone, arginfo_double_metaphone)
 	ZEND_FE(bmpm, arginfo_bmpm)
+	ZEND_FE(dm_soundex, arginfo_dm_soundex)
 	ZEND_FE_END
 };
