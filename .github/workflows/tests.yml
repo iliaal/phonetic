@@ -147,6 +147,12 @@ jobs:
         run: |
           git clone --depth=1 --branch=PHP-${{ matrix.php }} https://github.com/php/php-src.git /tmp/php-src
           cd /tmp/php-src
+          # -shared-libasan links binaries against clang's ASAN runtime .so; put its
+          # dir on the loader path so configure's run-test (and the built php binary)
+          # can resolve it. Persist to the later ASAN steps via GITHUB_ENV.
+          ASAN_RT_DIR="$(clang -print-runtime-dir)"
+          export LD_LIBRARY_PATH="$ASAN_RT_DIR:$LD_LIBRARY_PATH"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
           ./buildconf --force
           CC=clang CXX=clang++ \
           CFLAGS="-fsanitize=address,undefined -fno-sanitize=function,vptr -shared-libasan -DZEND_TRACK_ARENA_ALLOC" \
