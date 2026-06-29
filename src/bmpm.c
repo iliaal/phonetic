@@ -23,6 +23,7 @@
 #include "config.h"
 #endif
 
+#include <limits.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -1215,6 +1216,14 @@ PHP_FUNCTION(bmpm)
 	}
 	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
 		zend_argument_value_error(3, "must be either BMPM_APPROX or BMPM_EXACT");
+		RETURN_THROWS();
+	}
+
+	/* The code-point decoders index with signed int; refuse an input whose byte
+	 * length would overflow them before u8_decode's counter wraps. Unreachable
+	 * under any sane memory_limit (needs a ~2GB string). */
+	if (ZSTR_LEN(input) > (size_t) INT_MAX) {
+		zend_argument_value_error(1, "is too long");
 		RETURN_THROWS();
 	}
 

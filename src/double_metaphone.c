@@ -21,6 +21,7 @@
 #include "config.h"
 #endif
 
+#include <limits.h>
 #include <string.h>
 
 #include "php.h"
@@ -146,6 +147,14 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 	int adv;
 
 	if (len == 0) {
+		return;
+	}
+
+	/* The encoder walks the padded buffer with signed int cursors; a folded
+	 * length that would overflow them must be refused before the narrowing cast
+	 * below undersizes the allocation. Unreachable under any sane memory_limit
+	 * (folding never expands, so this needs a ~2GB input). */
+	if (len > (size_t) INT_MAX - (DM_PREPAD + DM_POSTPAD + 1)) {
 		return;
 	}
 
