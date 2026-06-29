@@ -12,3 +12,5 @@
  */
 
 function double_metaphone(string $string, int $max_length = 4): array {}
+
+function bmpm(string $string, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): string {}
