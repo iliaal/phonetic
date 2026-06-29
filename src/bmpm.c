@@ -108,17 +108,6 @@ static int u8_decode_buf(const char *s, uint32_t *buf, int cap)
 	return k;
 }
 
-static uint32_t u8_first(const char *s)
-{
-	const unsigned char *p = (const unsigned char *) s;
-	unsigned char c = p[0];
-	if (c < 0x80) return c;
-	if ((c >> 5) == 0x6) return ((c & 0x1fu) << 6) | (p[1] & 0x3fu);
-	if ((c >> 4) == 0xe) return ((c & 0x0fu) << 12) | ((p[1] & 0x3fu) << 6) | (p[2] & 0x3fu);
-	if ((c >> 3) == 0x1e) return ((c & 0x07u) << 18) | ((p[1] & 0x3fu) << 12) | ((p[2] & 0x3fu) << 6) | (p[3] & 0x3fu);
-	return c;
-}
-
 /* Append one code point to a smart_str as UTF-8. */
 static void u8_put(smart_str *out, uint32_t cp)
 {
@@ -342,19 +331,18 @@ static int atoms_match_at(const uint32_t *seg, int sn, const atom_t *atoms, int 
 	return 1;
 }
 
-/* General "find" matcher over the restricted regex grammar (anchors plus
- * literal / character-class atoms). Drives both the rare rule-context
- * fall-through cases and the language-guessing patterns. */
-static int regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
+/* Parse the restricted regex grammar (leading "^", trailing "$", literal and
+ * character-class atoms) into an atom array. Class atoms' cls pointers index
+ * into R, so R must outlive the parsed atoms. Returns the atom count. */
+static int parse_regex(const uint32_t *R, int Rn, atom_t *atoms, int cap, int *as_out, int *ae_out)
 {
 	int as = 0, ae = 0, pos = 0, end = Rn;
-	atom_t atoms[64];
 	int na = 0;
 
 	if (Rn > 0 && R[0] == '^') { as = 1; pos = 1; }
 	if (end > pos && R[end - 1] == '$') { ae = 1; end--; }
 
-	while (pos < end && na < 64) {
+	while (pos < end && na < cap) {
 		if (R[pos] == '[') {
 			int j = pos + 1, neg = 0, cs;
 			if (j < end && R[j] == '^') { neg = 1; j++; }
@@ -375,6 +363,14 @@ static int regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int 
 		}
 	}
 
+	*as_out = as;
+	*ae_out = ae;
+	return na;
+}
+
+/* Match a parsed atom sequence against seg, honouring the start/end anchors. */
+static int atoms_find(int as, int ae, const atom_t *atoms, int na, const uint32_t *seg, int sn)
+{
 	if (as && ae) {
 		if (sn != na) return 0;
 		return atoms_match_at(seg, sn, atoms, na, 0);
@@ -395,6 +391,17 @@ static int regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int 
 		}
 		return 0;
 	}
+}
+
+/* General "find" matcher over the restricted regex grammar (anchors plus
+ * literal / character-class atoms). Drives the rare rule-context fall-through
+ * cases; the language-guessing patterns use the pre-parsed form. */
+static int regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
+{
+	atom_t atoms[64];
+	int as, ae;
+	int na = parse_regex(R, Rn, atoms, 64, &as, &ae);
+	return atoms_find(as, ae, atoms, na, seg, sn);
 }
 
 /* Match a rule's raw left/right context. side 0 = left  (regex = raw + "$"),
@@ -503,7 +510,7 @@ static void pb_push(pbuilder *pb, const char *lt, size_t ln, const char *rt, siz
 static void pb_free(pbuilder *pb)
 {
 	size_t i;
-	for (i = 0; i < pb->n; i++) efree(pb->a[i].t);
+	for (i = 0; i < pb->n; i++) if (pb->a[i].t) efree(pb->a[i].t);
 	if (pb->a) efree(pb->a);
 	pb->a = NULL;
 	pb->n = pb->cap = 0;
@@ -651,44 +658,85 @@ static void pb_apply(pbuilder *pb, const char *raw_phoneme, int nt, int max)
 }
 
 /* ---------------------------------------------------------------------- */
-/* Rule lookup                                                            */
+/* Rule lookup + MINIT-built first-code-point dispatch index               */
 /* ---------------------------------------------------------------------- */
 
-static const bmpm_ruleset *find_ruleset(int nt, int rt, const char *lang)
+/* Per-rule pre-decoded pattern (code points + length), pointing into the
+ * ruleset's flat arena. Built once at MINIT, read-only thereafter. */
+typedef struct {
+	const uint32_t *pat;
+	int             plen;
+} rule_decoded;
+
+/* Per-ruleset dispatch index. Rules are bucketed by their pattern's first code
+ * point; within a bucket the original rule order is preserved so first-match-
+ * wins and longest-match semantics are unchanged. order[] is the flat list of
+ * rule indices grouped by bucket; bk_cp[] is the sorted distinct first code
+ * points with parallel bk_off[]/bk_cnt[] slices into order[]. */
+typedef struct {
+	rule_decoded *decoded;   /* [count], parallel to rs->rules */
+	uint32_t     *arena;     /* flat decoded-pattern storage */
+	int          *order;     /* [count], rule indices grouped by bucket */
+	uint32_t     *bk_cp;     /* [nbk], sorted distinct first code points */
+	int          *bk_off;    /* [nbk] */
+	int          *bk_cnt;    /* [nbk] */
+	int           nbk;
+	size_t        count;
+} ruleset_index;
+
+static ruleset_index *g_rs_index;   /* [bmpm_rulesets_count] */
+
+static int find_ruleset_idx(int nt, int rt, const char *lang)
 {
 	size_t i;
 	for (i = 0; i < bmpm_rulesets_count; i++) {
 		const bmpm_ruleset *r = &bmpm_rulesets[i];
 		if (r->name_type == nt && r->rule_type == rt && strcmp(r->language, lang) == 0) {
-			return r;
+			return (int) i;
 		}
 	}
-	return NULL;
+	return -1;
+}
+
+/* Locate the bucket for code point c; returns its [off,cnt) slice into order[]. */
+static int rs_dispatch(const ruleset_index *ix, uint32_t c, int *off, int *cnt)
+{
+	int lo = 0, hi = ix->nbk - 1;
+	while (lo <= hi) {
+		int mid = (lo + hi) >> 1;
+		uint32_t v = ix->bk_cp[mid];
+		if (v == c) { *off = ix->bk_off[mid]; *cnt = ix->bk_cnt[mid]; return 1; }
+		if (v < c) lo = mid + 1;
+		else hi = mid - 1;
+	}
+	return 0;
 }
 
 /* Walk the transliteration rules once across cp[0..n), mutating the builder.
  * Unmatched positions are dropped (no literal append), matching the main pass
  * in PhoneticEngine.encode. */
-static void run_main(pbuilder *pb, const bmpm_ruleset *rs, const uint32_t *cp, int n, int nt, int max)
+static void run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
+                     const uint32_t *cp, int n, int nt, int max)
 {
 	int i = 0;
 	if (rs == NULL || rs->rules == NULL) return;
 	while (i < n) {
-		int adv = 1;
-		size_t r;
-		for (r = 0; r < rs->count; r++) {
-			const bmpm_rule *rule = &rs->rules[r];
-			uint32_t pat[64];
-			int plen;
-			if (u8_first(rule->pattern) != cp[i]) continue;
-			plen = u8_decode_buf(rule->pattern, pat, 64);
-			if (i + plen > n) continue;
-			if (!seqeq(cp + i, plen, pat, plen)) continue;
-			if (!ctx_match(rule->rcontext, 1, cp + i + plen, n - i - plen)) continue;
-			if (!ctx_match(rule->lcontext, 0, cp, i)) continue;
-			pb_apply(pb, rule->phoneme, nt, max);
-			adv = plen;
-			break;
+		int adv = 1, off = 0, cnt = 0;
+		if (rs_dispatch(ix, cp[i], &off, &cnt)) {
+			int t;
+			for (t = 0; t < cnt; t++) {
+				int r = ix->order[off + t];
+				const bmpm_rule *rule = &rs->rules[r];
+				const uint32_t *pat = ix->decoded[r].pat;
+				int plen = ix->decoded[r].plen;
+				if (i + plen > n) continue;
+				if (!seqeq(cp + i, plen, pat, plen)) continue;
+				if (!ctx_match(rule->rcontext, 1, cp + i + plen, n - i - plen)) continue;
+				if (!ctx_match(rule->lcontext, 0, cp, i)) continue;
+				pb_apply(pb, rule->phoneme, nt, max);
+				adv = plen;
+				break;
+			}
 		}
 		i += adv;
 	}
@@ -711,7 +759,8 @@ static int phon_cmp(const char *a, size_t an, const char *b, size_t bn)
 /* Apply a final ruleset (common, then language-specific). Re-transcribes each
  * phoneme's text, then collapses duplicates by text while unioning language
  * sets, leaving the result ordered by the phoneme comparator. */
-static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, int nt, int max)
+static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
+                        int nt, int max)
 {
 	pbuilder result;
 	size_t pi;
@@ -735,22 +784,23 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, int nt, int max)
 
 		i = 0;
 		while (i < tn) {
-			int adv = 1, found = 0;
-			size_t r;
-			for (r = 0; r < rs->count; r++) {
-				const bmpm_rule *rule = &rs->rules[r];
-				uint32_t pat[64];
-				int plen;
-				if (u8_first(rule->pattern) != tcp[i]) continue;
-				plen = u8_decode_buf(rule->pattern, pat, 64);
-				if (i + plen > tn) continue;
-				if (!seqeq(tcp + i, plen, pat, plen)) continue;
-				if (!ctx_match(rule->rcontext, 1, tcp + i + plen, tn - i - plen)) continue;
-				if (!ctx_match(rule->lcontext, 0, tcp, i)) continue;
-				pb_apply(&sub, rule->phoneme, nt, max);
-				found = 1;
-				adv = plen;
-				break;
+			int adv = 1, found = 0, off = 0, cnt = 0;
+			if (rs_dispatch(ix, tcp[i], &off, &cnt)) {
+				int t;
+				for (t = 0; t < cnt; t++) {
+					int r = ix->order[off + t];
+					const bmpm_rule *rule = &rs->rules[r];
+					const uint32_t *pat = ix->decoded[r].pat;
+					int plen = ix->decoded[r].plen;
+					if (i + plen > tn) continue;
+					if (!seqeq(tcp + i, plen, pat, plen)) continue;
+					if (!ctx_match(rule->rcontext, 1, tcp + i + plen, tn - i - plen)) continue;
+					if (!ctx_match(rule->lcontext, 0, tcp, i)) continue;
+					pb_apply(&sub, rule->phoneme, nt, max);
+					found = 1;
+					adv = plen;
+					break;
+				}
 			}
 			if (!found) {
 				char ch = (char) tcp[i];
@@ -780,9 +830,12 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, int nt, int max)
 				}
 				memmove(&result.a[pos + 1], &result.a[pos],
 				        (result.n - pos) * sizeof(phon_t));
-				result.a[pos].t = estrndup(np->t, np->tn);
+				/* Move the sub-builder's owned phoneme text into the result
+				 * instead of copying it; null the source so pb_free skips it. */
+				result.a[pos].t = np->t;
 				result.a[pos].tn = np->tn;
 				result.a[pos].langs = np->langs;
+				np->t = NULL;
 				result.n++;
 			}
 		}
@@ -815,35 +868,53 @@ static char *pb_makestring(pbuilder *pb, size_t *outlen)
 }
 
 /* ---------------------------------------------------------------------- */
-/* Language guessing                                                      */
+/* Language guessing + MINIT-built pre-parsed guess rules                  */
 /* ---------------------------------------------------------------------- */
 
-static const bmpm_lang_set *find_lang_set(int nt)
+/* One language-guessing rule, decoded and regex-parsed once at MINIT. The
+ * atoms' class pointers index into R, and the accept mask is pre-resolved
+ * against the name type's language list. Read-only after MINIT. */
+typedef struct {
+	uint32_t *R;
+	int       Rn;
+	int       as, ae;
+	atom_t   *atoms;
+	int       na;
+	langset_t mask;
+	int       accept;
+} lang_parsed;
+
+typedef struct {
+	lang_parsed *rules;
+	size_t       count;
+} langset_index;
+
+static langset_index *g_lang_index;   /* [bmpm_lang_sets_count] */
+
+static int find_lang_slot(int nt)
 {
 	size_t i;
 	for (i = 0; i < bmpm_lang_sets_count; i++) {
-		if (bmpm_lang_sets[i].name_type == nt) return &bmpm_lang_sets[i];
+		if (bmpm_lang_sets[i].name_type == nt) return (int) i;
 	}
-	return NULL;
+	return 0;
 }
 
 static langset_t guess_languages(int nt, const char *input, size_t len)
 {
 	int n, i;
 	uint32_t *cp = u8_decode(input, len, &n);
-	const bmpm_lang_set *S = find_lang_set(nt);
+	const langset_index *li = &g_lang_index[find_lang_slot(nt)];
 	langset_t mask = ls_full(nt);
 	size_t r;
 
 	for (i = 0; i < n; i++) cp[i] = lc_cp(cp[i]);
 
-	for (r = 0; r < S->count; r++) {
-		uint32_t rb[256];
-		int rn = u8_decode_buf(S->rules[r].pattern, rb, 256);
-		if (regex_atom_match(rb, rn, cp, n)) {
-			langset_t rm = parse_lang_list(nt, S->rules[r].languages);
-			if (S->rules[r].accept) mask &= rm;
-			else mask &= ~rm;
+	for (r = 0; r < li->count; r++) {
+		const lang_parsed *lp = &li->rules[r];
+		if (atoms_find(lp->as, lp->ae, lp->atoms, lp->na, cp, n)) {
+			if (lp->accept) mask &= lp->mask;
+			else mask &= ~lp->mask;
 		}
 	}
 	efree(cp);
@@ -909,6 +980,8 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 	const char *lang = "any";
 	const char *single;
 	const bmpm_ruleset *rules_main, *final1, *final2;
+	const ruleset_index *ix_main, *ix_f1, *ix_f2;
+	int i_main, i_f1, i_f2;
 	int n, i;
 	uint32_t *cp;
 	int tn;            /* tidied length */
@@ -916,9 +989,15 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 
 	if (ls_singleton_lang(nt, ls, &single)) lang = single;
 
-	rules_main = find_ruleset(nt, BMPM_RULES, lang);
-	final1 = find_ruleset(nt, rt, "common");
-	final2 = find_ruleset(nt, rt, lang);
+	i_main = find_ruleset_idx(nt, BMPM_RULES, lang);
+	i_f1 = find_ruleset_idx(nt, rt, "common");
+	i_f2 = find_ruleset_idx(nt, rt, lang);
+	rules_main = i_main < 0 ? NULL : &bmpm_rulesets[i_main];
+	final1 = i_f1 < 0 ? NULL : &bmpm_rulesets[i_f1];
+	final2 = i_f2 < 0 ? NULL : &bmpm_rulesets[i_f2];
+	ix_main = i_main < 0 ? NULL : &g_rs_index[i_main];
+	ix_f1 = i_f1 < 0 ? NULL : &g_rs_index[i_f1];
+	ix_f2 = i_f2 < 0 ? NULL : &g_rs_index[i_f2];
 
 	/* tidy: lowercase, '-' -> space, trim (over code points) */
 	cp = u8_decode(input, len, &n);
@@ -1004,11 +1083,17 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 		}
 	}
 
-	/* split tidied input into words, build words2 per name type */
+	/* split tidied input into words, build words2 per name type. Word count is
+	 * bounded by tn (each word is at least one code point), so tn+1 entries
+	 * cover the worst case plus the empty-input "".split -> [""] sentinel.
+	 * Commons Codec imposes no word cap, so these grow with the input. */
 	{
-		struct { const uint32_t *p; int l; } words2[64];
+		size_t wcap = (size_t) tn + 1;
+		struct { const uint32_t *p; int l; } *words2 =
+			safe_emalloc(wcap, sizeof(*words2), 0);
 		int nw2 = 0;
-		struct { int s, l; } words[64];
+		struct { int s, l; } *words =
+			safe_emalloc(wcap, sizeof(*words), 0);
 		int nw = 0;
 
 		if (tn == 0) {
@@ -1018,7 +1103,7 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 			while (a < tn) {
 				int b = a;
 				while (b < tn && !is_ws(tcp[b])) b++;
-				if (b > a && nw < 64) { words[nw].s = a; words[nw].l = b - a; nw++; }
+				if (b > a) { words[nw].s = a; words[nw].l = b - a; nw++; }
 				a = b;
 				while (a < tn && is_ws(tcp[a])) a++;
 			}
@@ -1034,7 +1119,7 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 				for (j = 0; j < wl; j++) if (wp[j] == 0x27) last = j;
 				const uint32_t *segp = wp + (last + 1);
 				int segl = wl - (last + 1);
-				if (!is_prefix_word(nt, segp, segl) && nw2 < 64) {
+				if (!is_prefix_word(nt, segp, segl)) {
 					words2[nw2].p = segp; words2[nw2].l = segl; nw2++;
 				}
 			}
@@ -1043,18 +1128,16 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 			for (wi = 0; wi < nw; wi++) {
 				const uint32_t *wp = tcp + words[wi].s;
 				int wl = words[wi].l;
-				if (!is_prefix_word(nt, wp, wl) && nw2 < 64) {
+				if (!is_prefix_word(nt, wp, wl)) {
 					words2[nw2].p = wp; words2[nw2].l = wl; nw2++;
 				}
 			}
 		} else {
 			int wi;
 			for (wi = 0; wi < nw; wi++) {
-				if (nw2 < 64) {
-					words2[nw2].p = tcp + words[wi].s;
-					words2[nw2].l = words[wi].l;
-					nw2++;
-				}
+				words2[nw2].p = tcp + words[wi].s;
+				words2[nw2].l = words[wi].l;
+				nw2++;
 			}
 		}
 
@@ -1074,12 +1157,14 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 				char *out;
 				pb_init(&pb);
 				pb_seed(&pb, ls);
-				run_main(&pb, rules_main, jn, jl, nt, BMPM_MAX_PHONEMES);
-				apply_final(&pb, final1, nt, BMPM_MAX_PHONEMES);
-				apply_final(&pb, final2, nt, BMPM_MAX_PHONEMES);
+				run_main(&pb, rules_main, ix_main, jn, jl, nt, BMPM_MAX_PHONEMES);
+				apply_final(&pb, final1, ix_f1, nt, BMPM_MAX_PHONEMES);
+				apply_final(&pb, final2, ix_f2, nt, BMPM_MAX_PHONEMES);
 				out = pb_makestring(&pb, outlen);
 				pb_free(&pb);
 				efree(jn);
+				efree(words);
+				efree(words2);
 				efree(cp);
 				return out;
 			}
@@ -1139,4 +1224,134 @@ PHP_FUNCTION(bmpm)
 
 	RETVAL_STRINGL(result, result_len);
 	efree(result);
+}
+
+/* ---------------------------------------------------------------------- */
+/* MINIT / MSHUTDOWN: build and free the read-only dispatch indices        */
+/* ---------------------------------------------------------------------- */
+
+static void build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
+{
+	size_t i;
+	size_t total = 0, pos = 0;
+	uint32_t *firsts;
+	int nf = 0, k, op = 0;
+
+	ix->decoded = NULL; ix->arena = NULL; ix->order = NULL;
+	ix->bk_cp = NULL; ix->bk_off = NULL; ix->bk_cnt = NULL;
+	ix->nbk = 0; ix->count = rs->count;
+
+	if (rs->rules == NULL || rs->count == 0) return;
+
+	ix->decoded = pemalloc(rs->count * sizeof(rule_decoded), 1);
+	for (i = 0; i < rs->count; i++) {
+		uint32_t b[64];
+		ix->decoded[i].plen = u8_decode_buf(rs->rules[i].pattern, b, 64);
+		total += (size_t) ix->decoded[i].plen;
+	}
+	ix->arena = pemalloc((total ? total : 1) * sizeof(uint32_t), 1);
+	for (i = 0; i < rs->count; i++) {
+		int pl = ix->decoded[i].plen;
+		u8_decode_buf(rs->rules[i].pattern, ix->arena + pos, pl);
+		ix->decoded[i].pat = ix->arena + pos;
+		pos += (size_t) pl;
+	}
+
+	/* distinct first code points, sorted ascending */
+	firsts = pemalloc(rs->count * sizeof(uint32_t), 1);
+	for (i = 0; i < rs->count; i++) {
+		uint32_t c = ix->decoded[i].pat[0];
+		int seen = 0, j;
+		for (j = 0; j < nf; j++) if (firsts[j] == c) { seen = 1; break; }
+		if (!seen) firsts[nf++] = c;
+	}
+	for (k = 1; k < nf; k++) {            /* insertion sort */
+		uint32_t key = firsts[k];
+		int j = k - 1;
+		while (j >= 0 && firsts[j] > key) { firsts[j + 1] = firsts[j]; j--; }
+		firsts[j + 1] = key;
+	}
+
+	ix->nbk = nf;
+	ix->order = pemalloc(rs->count * sizeof(int), 1);
+	ix->bk_cp = pemalloc((nf ? (size_t) nf : 1) * sizeof(uint32_t), 1);
+	ix->bk_off = pemalloc((nf ? (size_t) nf : 1) * sizeof(int), 1);
+	ix->bk_cnt = pemalloc((nf ? (size_t) nf : 1) * sizeof(int), 1);
+	for (k = 0; k < nf; k++) {
+		uint32_t c = firsts[k];
+		int cnt = 0;
+		ix->bk_cp[k] = c;
+		ix->bk_off[k] = op;
+		for (i = 0; i < rs->count; i++) {    /* original order within bucket */
+			if (ix->decoded[i].pat[0] == c) { ix->order[op++] = (int) i; cnt++; }
+		}
+		ix->bk_cnt[k] = cnt;
+	}
+	pefree(firsts, 1);
+}
+
+static void build_lang_index(const bmpm_lang_set *S, int nt, langset_index *li)
+{
+	size_t r;
+	li->count = S->count;
+	li->rules = pemalloc((S->count ? S->count : 1) * sizeof(lang_parsed), 1);
+	for (r = 0; r < S->count; r++) {
+		lang_parsed *lp = &li->rules[r];
+		uint32_t buf[512];
+		atom_t tmp[128];
+		int dn = u8_decode_buf(S->rules[r].pattern, buf, 512);
+		int as, ae, na;
+		lp->R = pemalloc((dn ? (size_t) dn : 1) * sizeof(uint32_t), 1);
+		if (dn) memcpy(lp->R, buf, (size_t) dn * sizeof(uint32_t));
+		lp->Rn = dn;
+		na = parse_regex(lp->R, dn, tmp, 128, &as, &ae);
+		lp->as = as; lp->ae = ae; lp->na = na;
+		lp->atoms = pemalloc((na ? (size_t) na : 1) * sizeof(atom_t), 1);
+		if (na) memcpy(lp->atoms, tmp, (size_t) na * sizeof(atom_t));
+		lp->mask = parse_lang_list(nt, S->rules[r].languages);
+		lp->accept = S->rules[r].accept;
+	}
+}
+
+void bmpm_minit(void)
+{
+	size_t i;
+	g_rs_index = pemalloc(bmpm_rulesets_count * sizeof(ruleset_index), 1);
+	for (i = 0; i < bmpm_rulesets_count; i++) {
+		build_ruleset_index(&bmpm_rulesets[i], &g_rs_index[i]);
+	}
+	g_lang_index = pemalloc(bmpm_lang_sets_count * sizeof(langset_index), 1);
+	for (i = 0; i < bmpm_lang_sets_count; i++) {
+		build_lang_index(&bmpm_lang_sets[i], bmpm_lang_sets[i].name_type, &g_lang_index[i]);
+	}
+}
+
+void bmpm_mshutdown(void)
+{
+	size_t i, r;
+	if (g_rs_index) {
+		for (i = 0; i < bmpm_rulesets_count; i++) {
+			ruleset_index *ix = &g_rs_index[i];
+			if (ix->decoded) pefree(ix->decoded, 1);
+			if (ix->arena) pefree(ix->arena, 1);
+			if (ix->order) pefree(ix->order, 1);
+			if (ix->bk_cp) pefree(ix->bk_cp, 1);
+			if (ix->bk_off) pefree(ix->bk_off, 1);
+			if (ix->bk_cnt) pefree(ix->bk_cnt, 1);
+		}
+		pefree(g_rs_index, 1);
+		g_rs_index = NULL;
+	}
+	if (g_lang_index) {
+		for (i = 0; i < bmpm_lang_sets_count; i++) {
+			langset_index *li = &g_lang_index[i];
+			for (r = 0; r < li->count; r++) {
+				if (li->rules[r].R) pefree(li->rules[r].R, 1);
+				if (li->rules[r].atoms) pefree(li->rules[r].atoms, 1);
+			}
+			if (li->rules) pefree(li->rules, 1);
+		}
+		pefree(g_lang_index, 1);
+		g_lang_index = NULL;
+	}
 }

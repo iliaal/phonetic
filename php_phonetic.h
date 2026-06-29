@@ -20,6 +20,9 @@
 extern zend_module_entry phonetic_module_entry;
 #define phpext_phonetic_ptr &phonetic_module_entry
 
+void bmpm_minit(void);
+void bmpm_mshutdown(void);
+
 #ifdef PHP_WIN32
 #define PHP_PHONETIC_API __declspec(dllexport)
 #else
