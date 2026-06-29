@@ -1004,11 +1004,17 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 		}
 	}
 
-	/* split tidied input into words, build words2 per name type */
+	/* split tidied input into words, build words2 per name type. Word count is
+	 * bounded by tn (each word is at least one code point), so tn+1 entries
+	 * cover the worst case plus the empty-input "".split -> [""] sentinel.
+	 * Commons Codec imposes no word cap, so these grow with the input. */
 	{
-		struct { const uint32_t *p; int l; } words2[64];
+		size_t wcap = (size_t) tn + 1;
+		struct { const uint32_t *p; int l; } *words2 =
+			safe_emalloc(wcap, sizeof(*words2), 0);
 		int nw2 = 0;
-		struct { int s, l; } words[64];
+		struct { int s, l; } *words =
+			safe_emalloc(wcap, sizeof(*words), 0);
 		int nw = 0;
 
 		if (tn == 0) {
@@ -1018,7 +1024,7 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 			while (a < tn) {
 				int b = a;
 				while (b < tn && !is_ws(tcp[b])) b++;
-				if (b > a && nw < 64) { words[nw].s = a; words[nw].l = b - a; nw++; }
+				if (b > a) { words[nw].s = a; words[nw].l = b - a; nw++; }
 				a = b;
 				while (a < tn && is_ws(tcp[a])) a++;
 			}
@@ -1034,7 +1040,7 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 				for (j = 0; j < wl; j++) if (wp[j] == 0x27) last = j;
 				const uint32_t *segp = wp + (last + 1);
 				int segl = wl - (last + 1);
-				if (!is_prefix_word(nt, segp, segl) && nw2 < 64) {
+				if (!is_prefix_word(nt, segp, segl)) {
 					words2[nw2].p = segp; words2[nw2].l = segl; nw2++;
 				}
 			}
@@ -1043,18 +1049,16 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 			for (wi = 0; wi < nw; wi++) {
 				const uint32_t *wp = tcp + words[wi].s;
 				int wl = words[wi].l;
-				if (!is_prefix_word(nt, wp, wl) && nw2 < 64) {
+				if (!is_prefix_word(nt, wp, wl)) {
 					words2[nw2].p = wp; words2[nw2].l = wl; nw2++;
 				}
 			}
 		} else {
 			int wi;
 			for (wi = 0; wi < nw; wi++) {
-				if (nw2 < 64) {
-					words2[nw2].p = tcp + words[wi].s;
-					words2[nw2].l = words[wi].l;
-					nw2++;
-				}
+				words2[nw2].p = tcp + words[wi].s;
+				words2[nw2].l = words[wi].l;
+				nw2++;
 			}
 		}
 
@@ -1080,6 +1084,8 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 				out = pb_makestring(&pb, outlen);
 				pb_free(&pb);
 				efree(jn);
+				efree(words);
+				efree(words2);
 				efree(cp);
 				return out;
 			}
