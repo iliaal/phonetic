@@ -1,0 +1,17 @@
+# Read by /release-ext. Schema documented in ~/.claude/commands/release-ext.md.
+
+extension: phonetic                       # from composer.json name iliaal/phonetic
+version_macro: PHP_PHONETIC_VERSION       # from php_phonetic.h
+version_file: php_phonetic.h
+repo: iliaal/phonetic                     # composer slug (no git remote yet)
+build_matrix:                             # php-install-PHP-* present; floor is 8.1
+  - PHP-8.1
+  - PHP-8.2
+  - PHP-8.3
+  - PHP-8.4
+  - PHP-8.5
+configure_base: "--enable-phonetic --enable-phonetic-dev"
+smoke_test: scripts/pie-smoke.sh
+windows_ci: true                          # .github/workflows/release-windows.yml present
+linux_prebuilt: false                     # no Linux release workflow scaffolded
+asan_test: true                           # asan job in .github/workflows/tests.yml
