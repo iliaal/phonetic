@@ -21,7 +21,6 @@
 #include "config.h"
 #endif
 
-#include <ctype.h>
 #include <string.h>
 
 #include "php.h"
@@ -112,7 +111,11 @@ static void dm_fold(const char *src, size_t len, smart_str *out)
 		unsigned char b = (unsigned char) src[i];
 
 		if (b < 0x80) {
-			smart_str_appendc(out, (char) toupper(b));
+			/* ASCII-only uppercasing: libc toupper() honours LC_CTYPE, and a
+			 * userland setlocale() (e.g. tr_TR) would mis-fold the buffer the
+			 * encoder walks. The algorithm is defined over ASCII A-Z. */
+			char u = (b >= 'a' && b <= 'z') ? (char) (b - 'a' + 'A') : (char) b;
+			smart_str_appendc(out, u);
 			i++;
 		} else if (b >= 0xC0 && b <= 0xDF && i + 1 < len
 				&& ((unsigned char) src[i + 1] & 0xC0) == 0x80) {
@@ -723,6 +726,7 @@ PHP_FUNCTION(double_metaphone)
 		slen = ZSTR_LEN(secondary.s);
 	}
 
+	/* max_length <= 0 means "no limit": emit the full untruncated codes. */
 	if (max_length > 0) {
 		if (plen > (size_t) max_length) {
 			plen = (size_t) max_length;

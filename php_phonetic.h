@@ -13,6 +13,8 @@
 #ifndef PHP_PHONETIC_H
 #define PHP_PHONETIC_H
 
+#include "php.h"
+
 #define PHP_PHONETIC_VERSION "0.1.0"
 
 extern zend_module_entry phonetic_module_entry;
@@ -23,7 +25,5 @@ extern zend_module_entry phonetic_module_entry;
 #else
 #define PHP_PHONETIC_API
 #endif
-
-#include "php.h"
 
 #endif /* PHP_PHONETIC_H */
