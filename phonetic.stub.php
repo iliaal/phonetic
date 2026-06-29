@@ -10,3 +10,5 @@
  *
  * Run /php-stub-regen after editing to refresh phonetic_arginfo.h.
  */
+
+function double_metaphone(string $string, int $max_length = 4): array {}
