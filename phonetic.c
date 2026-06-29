@@ -17,12 +17,7 @@
 #include "php.h"
 #include "ext/standard/info.h"
 #include "php_phonetic.h"
-
-/* Function table is empty in the scaffold; double_metaphone(), bmpm() and
- * dm_soundex() are registered through the stub-driven arginfo as each lands. */
-static const zend_function_entry phonetic_functions[] = {
-	PHP_FE_END
-};
+#include "phonetic_arginfo.h"
 
 PHP_MINIT_FUNCTION(phonetic)
 {
@@ -42,7 +37,7 @@ PHP_MINFO_FUNCTION(phonetic)
 zend_module_entry phonetic_module_entry = {
 	STANDARD_MODULE_HEADER,
 	"phonetic",
-	phonetic_functions,
+	ext_functions,
 	PHP_MINIT(phonetic),
 	NULL,
 	NULL,
