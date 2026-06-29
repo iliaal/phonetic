@@ -23,5 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by `LC_CTYPE`, e.g. a Turkish locale).
 - `bmpm()`: bounded the GENERIC `d'`/name-prefix recursion (`BMPM_MAX_PREFIX_DEPTH`)
   to prevent a native stack-overflow crash on crafted deeply-nested input.
+- `bmpm()`: size the word buffers to the input instead of a fixed 64, so names
+  with more than 64 words no longer silently drop the excess.
 
 [Unreleased]: https://github.com/iliaal/phonetic/commits/master
