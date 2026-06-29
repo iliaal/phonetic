@@ -1,3 +1,12 @@
+This project is distributed under two licenses. The phonetic extension itself is
+licensed under the BSD 3-Clause license (Section 1). The phonetic rule data
+vendored under vendor/commons-codec-bm/ is licensed under the Apache License,
+Version 2.0 (Section 2).
+
+================================================================================
+Section 1: BSD 3-Clause License (the phonetic extension)
+================================================================================
+
 Copyright (c) 2026, Ilia Alshanetsky.
 Copyright (c) 2026, Advanced Internet Designs Inc.
 
@@ -25,3 +34,25 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+Section 2: Apache License 2.0 (vendored rule data)
+================================================================================
+
+The files under vendor/commons-codec-bm/ are derived from Apache Commons Codec
+(https://github.com/apache/commons-codec) and are licensed to you under the
+Apache License, Version 2.0. Each vendored file retains its original Apache-2.0
+license header. See vendor/commons-codec-bm/VENDOR.md for the exact upstream
+commit and file provenance.
+
+   Licensed under the Apache License, Version 2.0 (the "License"); you may not
+   use these files except in compliance with the License. You may obtain a copy
+   of the License at
+
+       https://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+   WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+   License for the specific language governing permissions and limitations
+   under the License.
