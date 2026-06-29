@@ -184,9 +184,11 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 		pos++;
 	}
 
-	/* The (pc, sc, adv) triple persists across iterations: a handful of branches
-	 * deliberately leave it untouched (the GH gaps, unhandled bytes), reusing the
-	 * previous step's action exactly as the reference algorithm does. */
+	/* The (pc, sc, adv) triple persists across iterations: a handful of letter
+	 * branches (the GH gaps) deliberately leave it untouched to reuse the
+	 * previous step's action, as the reference algorithm does. Non-letter bytes
+	 * are handled by the switch default, which skips them (emit nothing,
+	 * advance one). */
 	pc = NULL;
 	sc = NULL;
 	adv = 1;
@@ -670,8 +672,13 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				break;
 
 			default:
-				/* Non-letter byte that survived folding: keep the previous
-				 * action, matching the reference scanner. */
+				/* Non-letter byte that survived folding (digit, punctuation,
+				 * hyphen): emit nothing and advance one, like a space. Commons
+				 * Codec's DoubleMetaphone does `default: index++`. The old
+				 * "carry the previous action" duplicated the prior phoneme
+				 * ("a1b2" -> AAPP not AP; "Smith-Jones" != "Smith Jones"). */
+				pc = sc = NULL;
+				adv = 1;
 				break;
 			}
 		}
