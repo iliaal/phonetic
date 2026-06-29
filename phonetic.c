@@ -22,6 +22,13 @@
 PHP_MINIT_FUNCTION(phonetic)
 {
 	register_phonetic_symbols(module_number);
+	bmpm_minit();
+	return SUCCESS;
+}
+
+PHP_MSHUTDOWN_FUNCTION(phonetic)
+{
+	bmpm_mshutdown();
 	return SUCCESS;
 }
 
@@ -38,7 +45,7 @@ zend_module_entry phonetic_module_entry = {
 	"phonetic",
 	ext_functions,
 	PHP_MINIT(phonetic),
-	NULL,
+	PHP_MSHUTDOWN(phonetic),
 	NULL,
 	NULL,
 	PHP_MINFO(phonetic),
