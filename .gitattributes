@@ -1,0 +1,10 @@
+# Force LF on all text files regardless of host OS. Windows runners
+# otherwise autocrlf-convert files during checkout, which breaks exact
+# byte compares in the phonetic parity corpora and the vendored
+# Commons Codec rule files.
+* text=auto eol=lf
+
+# Vendored Commons Codec rule data: exact byte semantics matter (the
+# codegen parses them and parity depends on them), so git never touches
+# the content under any autocrlf mode.
+vendor/commons-codec-bm/*.txt binary

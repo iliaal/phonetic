@@ -1,0 +1,6 @@
+# LeakSanitizer suppressions for the ASAN CI lane.
+#
+# Add narrow, specific suppressions here for known process-lifetime
+# allocations (e.g. one-time MINIT rule-table setup) rather than disabling
+# leak detection wholesale. Format: `leak:<substring of frame>`.
+# See ~/ai/wiki/debugging/asan-php-extension.md.
