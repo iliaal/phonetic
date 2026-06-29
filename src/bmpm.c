@@ -64,12 +64,14 @@ static uint32_t *u8_decode(const char *s, size_t len, int *n)
 		int adv;
 		if (c < 0x80) {
 			cp = c; adv = 1;
-		} else if ((c >> 5) == 0x6 && i + 1 < len) {
+		} else if ((c >> 5) == 0x6 && i + 1 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80) {
 			cp = ((c & 0x1fu) << 6) | ((unsigned char) s[i + 1] & 0x3fu); adv = 2;
-		} else if ((c >> 4) == 0xe && i + 2 < len) {
+		} else if ((c >> 4) == 0xe && i + 2 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80 &&
+		           ((unsigned char) s[i + 2] & 0xc0) == 0x80) {
 			cp = ((c & 0x0fu) << 12) | (((unsigned char) s[i + 1] & 0x3fu) << 6) |
 			     ((unsigned char) s[i + 2] & 0x3fu); adv = 3;
-		} else if ((c >> 3) == 0x1e && i + 3 < len) {
+		} else if ((c >> 3) == 0x1e && i + 3 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80 &&
+		           ((unsigned char) s[i + 2] & 0xc0) == 0x80 && ((unsigned char) s[i + 3] & 0xc0) == 0x80) {
 			cp = ((c & 0x07u) << 18) | (((unsigned char) s[i + 1] & 0x3fu) << 12) |
 			     (((unsigned char) s[i + 2] & 0x3fu) << 6) | ((unsigned char) s[i + 3] & 0x3fu); adv = 4;
 		} else {
@@ -92,12 +94,14 @@ static int u8_decode_buf(const char *s, uint32_t *buf, int cap)
 		int adv;
 		if (c < 0x80) {
 			cp = c; adv = 1;
-		} else if ((c >> 5) == 0x6 && i + 1 < len) {
+		} else if ((c >> 5) == 0x6 && i + 1 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80) {
 			cp = ((c & 0x1fu) << 6) | ((unsigned char) s[i + 1] & 0x3fu); adv = 2;
-		} else if ((c >> 4) == 0xe && i + 2 < len) {
+		} else if ((c >> 4) == 0xe && i + 2 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80 &&
+		           ((unsigned char) s[i + 2] & 0xc0) == 0x80) {
 			cp = ((c & 0x0fu) << 12) | (((unsigned char) s[i + 1] & 0x3fu) << 6) |
 			     ((unsigned char) s[i + 2] & 0x3fu); adv = 3;
-		} else if ((c >> 3) == 0x1e && i + 3 < len) {
+		} else if ((c >> 3) == 0x1e && i + 3 < len && ((unsigned char) s[i + 1] & 0xc0) == 0x80 &&
+		           ((unsigned char) s[i + 2] & 0xc0) == 0x80 && ((unsigned char) s[i + 3] & 0xc0) == 0x80) {
 			cp = ((c & 0x07u) << 18) | (((unsigned char) s[i + 1] & 0x3fu) << 12) |
 			     (((unsigned char) s[i + 2] & 0x3fu) << 6) | ((unsigned char) s[i + 3] & 0x3fu); adv = 4;
 		} else {
