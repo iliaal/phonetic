@@ -26,12 +26,23 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 #include "php.h"
 #include "zend_smart_str.h"
 #include "php_phonetic.h"
 #include "bmpm_data.h"
 
 #define BMPM_MAX_PHONEMES 20
+
+/* The GENERIC d'/name-prefix handling recurses (encode_core -> encode_guess ->
+ * encode_core), peeling one code point per level. Real names nest at most one
+ * or two prefixes; crafted input ("d" followed by thousands of apostrophes)
+ * would otherwise drive O(input-length) native recursion and smash the C stack.
+ * Past this depth, stop treating a leading prefix specially and encode inline. */
+#define BMPM_MAX_PREFIX_DEPTH 16
 
 typedef uint32_t langset_t;
 #define LS_NONE 0u
@@ -230,11 +241,27 @@ static langset_t ls_merge(langset_t a, langset_t b)
 	return a | b;
 }
 
+/* Index of the lowest set bit; ls is guaranteed non-zero by the caller. */
+static int ls_ctz(uint32_t ls)
+{
+#if defined(__GNUC__) || defined(__clang__)
+	return __builtin_ctz(ls);
+#elif defined(_MSC_VER)
+	unsigned long idx;
+	_BitScanForward(&idx, ls);
+	return (int) idx;
+#else
+	int n = 0;
+	while (!(ls & 1u)) { ls >>= 1; n++; }
+	return n;
+#endif
+}
+
 static int ls_singleton_lang(int nt, langset_t ls, const char **name)
 {
 	if (ls == LS_ANY || ls == LS_NONE) return 0;
 	if ((ls & (ls - 1)) != 0) return 0;       /* more than one bit */
-	int idx = __builtin_ctz(ls);
+	int idx = ls_ctz(ls);
 	*name = nt_langs(nt)->languages[idx];
 	return 1;
 }
@@ -875,9 +902,9 @@ static int is_ws(uint32_t c)
 /* Encoding                                                               */
 /* ---------------------------------------------------------------------- */
 
-static char *encode_guess(int nt, int rt, const char *input, size_t len, size_t *outlen);
+static char *encode_guess(int nt, int rt, const char *input, size_t len, size_t *outlen, int depth);
 
-static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t len, size_t *outlen)
+static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t len, size_t *outlen, int depth)
 {
 	const char *lang = "any";
 	const char *single;
@@ -908,8 +935,8 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 		tn = b - a;
 	}
 
-	/* GENERIC d' and name-prefix recursion */
-	if (nt == BMPM_GEN) {
+	/* GENERIC d' and name-prefix recursion (depth-bounded; see BMPM_MAX_PREFIX_DEPTH) */
+	if (nt == BMPM_GEN && depth < BMPM_MAX_PREFIX_DEPTH) {
 		if (tn >= 2 && tcp[0] == 'd' && tcp[1] == 0x27) {
 			size_t rl, cl, rr, cr;
 			char *rem = u8_encode(tcp + 2, tn - 2, &rl);
@@ -921,8 +948,8 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 			memcpy(cbuf + 1, tcp + 2, (size_t) (tn - 2) * sizeof(uint32_t));
 			comb = u8_encode(cbuf, tn - 1, &cl);
 			efree(cbuf);
-			renc = encode_guess(nt, rt, rem, rl, &rr);
-			cenc = encode_guess(nt, rt, comb, cl, &cr);
+			renc = encode_guess(nt, rt, rem, rl, &rr, depth + 1);
+			cenc = encode_guess(nt, rt, comb, cl, &cr, depth + 1);
 			smart_str_appendc(&s, '(');
 			smart_str_appendl(&s, renc, rr);
 			smart_str_appendl(&s, ")-(", 3);
@@ -958,8 +985,8 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 					memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
 					comb = u8_encode(cbuf, ll + remn, &cl);
 					efree(cbuf);
-					renc = encode_guess(nt, rt, rem, rl, &rr);
-					cenc = encode_guess(nt, rt, comb, cl, &cr);
+					renc = encode_guess(nt, rt, rem, rl, &rr, depth + 1);
+					cenc = encode_guess(nt, rt, comb, cl, &cr, depth + 1);
 					smart_str_appendc(&s, '(');
 					smart_str_appendl(&s, renc, rr);
 					smart_str_appendl(&s, ")-(", 3);
@@ -1060,10 +1087,10 @@ static char *encode_core(int nt, int rt, langset_t ls, const char *input, size_t
 	}
 }
 
-static char *encode_guess(int nt, int rt, const char *input, size_t len, size_t *outlen)
+static char *encode_guess(int nt, int rt, const char *input, size_t len, size_t *outlen, int depth)
 {
 	langset_t ls = guess_languages(nt, input, len);
-	return encode_core(nt, rt, ls, input, len, outlen);
+	return encode_core(nt, rt, ls, input, len, outlen, depth);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1104,10 +1131,10 @@ PHP_FUNCTION(bmpm)
 			RETURN_THROWS();
 		}
 		result = encode_core((int) name_type, (int) accuracy, (langset_t) (1u << idx),
-		                     ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
+		                     ZSTR_VAL(input), ZSTR_LEN(input), &result_len, 0);
 	} else {
 		result = encode_guess((int) name_type, (int) accuracy,
-		                      ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
+		                      ZSTR_VAL(input), ZSTR_LEN(input), &result_len, 0);
 	}
 
 	RETVAL_STRINGL(result, result_len);
