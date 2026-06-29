@@ -82,11 +82,23 @@ php -r 'echo "phonetic version: ", phpversion("phonetic"), PHP_EOL;'
 echo
 
 echo "---- 7. Functional smoke test ----"
-# Expanded with real double_metaphone()/bmpm()/dm_soundex() assertions once
-# those functions land; for now the load + version check above is the gate.
 php -r '
 if (!extension_loaded("phonetic")) { echo "load FAIL\n"; exit(1); }
 echo "load OK\n";
+
+$dm = double_metaphone("Schwarzenegger");
+if ($dm !== ["primary" => "XRSN", "alternate" => "XFRT"]) {
+    echo "double_metaphone FAIL: ", var_export($dm, true), "\n"; exit(1);
+}
+echo "double_metaphone OK\n";
+
+$b = bmpm("Garcia", BMPM_SEPHARDIC, BMPM_EXACT);
+if ($b !== "garsia|gartSa") { echo "bmpm FAIL: ", var_export($b, true), "\n"; exit(1); }
+echo "bmpm OK\n";
+
+$s = dm_soundex("Auerbach");
+if ($s !== ["097400", "097500"]) { echo "dm_soundex FAIL: ", var_export($s, true), "\n"; exit(1); }
+echo "dm_soundex OK\n";
 '
 echo
 echo "======================================================================"

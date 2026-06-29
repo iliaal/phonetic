@@ -16,10 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — Beider-Morse Phonetic Matching, reproducing Apache Commons Codec's default
   `BeiderMorseEncoder` semantics (100% exact parity over a 2234-comparison corpus).
   Constants: `BMPM_GENERIC`, `BMPM_ASHKENAZI`, `BMPM_SEPHARDIC`, `BMPM_APPROX`, `BMPM_EXACT`.
+- `dm_soundex(string $string): array` — Daitch-Mokotoff Soundex, returning the
+  list of distinct 6-digit codes, reproducing Apache Commons Codec's
+  `DaitchMokotoffSoundex` (branching mode) at 100% exact set-parity.
 - Vendored Beider-Morse and Daitch-Mokotoff rule data from Apache Commons Codec
   (Apache-2.0) under `vendor/commons-codec-bm/`, with `scripts/gen_bmpm_data.php`
   generating `src/bmpm_data.h`. Licensing reflected in `LICENSE` (Section 2) and
   the `composer.json` SPDX array.
-- Still to land for 0.1.0: the `dm_soundex()` engine over the vendored data.
+
+All three encoders build warning-clean and pass their golden-vector suites on
+PHP 8.1 through 8.5.
 
 [Unreleased]: https://github.com/iliaal/phonetic/commits/master
