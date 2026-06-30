@@ -228,6 +228,63 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 }
 
 /* ---------------------------------------------------------------------- */
+/* MINIT-built first-byte dispatch index over dm_rules                     */
+/* ---------------------------------------------------------------------- */
+
+/* Precomputed pattern byte-length and code-point length per rule, plus rule
+ * indices bucketed by the pattern's first byte. dms_encode then scans only the
+ * rules that can match at the current position instead of all of dm_rules, and
+ * never recomputes strlen()/cplen() in the hot loop. Read-only after MINIT. */
+static int *g_dms_plen;        /* [dm_rules_count] strlen(pattern) */
+static int *g_dms_pcplen;      /* [dm_rules_count] code-point length */
+static int *g_dms_order;       /* [dm_rules_count] rule indices grouped by first byte */
+static int  g_dms_off[256];
+static int  g_dms_cnt[256];
+
+void dms_minit(void)
+{
+	size_t r;
+	int b, pos;
+	int fillpos[256];
+
+	g_dms_plen   = pemalloc(dm_rules_count * sizeof(int), 1);
+	g_dms_pcplen = pemalloc(dm_rules_count * sizeof(int), 1);
+	g_dms_order  = pemalloc(dm_rules_count * sizeof(int), 1);
+
+	memset(g_dms_cnt, 0, sizeof g_dms_cnt);
+	for (r = 0; r < dm_rules_count; r++) {
+		const char *pat = dm_rules[r].pattern;
+		int pb = (int) strlen(pat);
+		g_dms_plen[r]   = pb;
+		g_dms_pcplen[r] = dms_u8_cplen(pat, (size_t) pb);
+		if (pb > 0) {
+			g_dms_cnt[(unsigned char) pat[0]]++;
+		}
+	}
+
+	pos = 0;
+	for (b = 0; b < 256; b++) {
+		g_dms_off[b] = pos;
+		pos += g_dms_cnt[b];
+	}
+
+	memcpy(fillpos, g_dms_off, sizeof fillpos);
+	for (r = 0; r < dm_rules_count; r++) {
+		if (g_dms_plen[r] > 0) {
+			unsigned char fb = (unsigned char) dm_rules[r].pattern[0];
+			g_dms_order[fillpos[fb]++] = (int) r;
+		}
+	}
+}
+
+void dms_mshutdown(void)
+{
+	if (g_dms_plen)   { pefree(g_dms_plen, 1);   g_dms_plen = NULL; }
+	if (g_dms_pcplen) { pefree(g_dms_pcplen, 1); g_dms_pcplen = NULL; }
+	if (g_dms_order)  { pefree(g_dms_order, 1);  g_dms_order = NULL; }
+}
+
+/* ---------------------------------------------------------------------- */
 /* Encoder                                                                */
 /* ---------------------------------------------------------------------- */
 
@@ -305,24 +362,27 @@ static void dms_encode(const char *buf, size_t buflen, dms_set *out)
 		int nalts;
 		int force;
 		dms_set next;
-		size_t r;
 
-		/* Longest pattern matching at this position. */
-		for (r = 0; r < dm_rules_count; r++) {
-			const char *pat = dm_rules[r].pattern;
-			size_t pb = strlen(pat);
-			int pcp;
-			if (pb == 0 || index + pb > buflen) {
-				continue;
-			}
-			if (memcmp(buf + index, pat, pb) != 0) {
-				continue;
-			}
-			pcp = dms_u8_cplen(pat, pb);
-			if (best == NULL || pcp > best_cplen) {
-				best = &dm_rules[r];
-				best_cplen = pcp;
-				best_bytes = (int) pb;
+		/* Longest pattern matching at this position. Only rules whose pattern
+		 * starts with the current byte can match, so scan that bucket alone and
+		 * read the pre-stored byte/code-point lengths instead of recomputing. */
+		{
+			unsigned char fb = (unsigned char) buf[index];
+			int off = g_dms_off[fb], cnt = g_dms_cnt[fb], t;
+			for (t = 0; t < cnt; t++) {
+				int rr = g_dms_order[off + t];
+				int pb = g_dms_plen[rr];
+				if ((size_t) index + (size_t) pb > buflen) {
+					continue;
+				}
+				if (memcmp(buf + index, dm_rules[rr].pattern, (size_t) pb) != 0) {
+					continue;
+				}
+				if (best == NULL || g_dms_pcplen[rr] > best_cplen) {
+					best = &dm_rules[rr];
+					best_cplen = g_dms_pcplen[rr];
+					best_bytes = pb;
+				}
 			}
 		}
 
