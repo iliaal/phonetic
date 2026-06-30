@@ -197,3 +197,35 @@ jobs:
             echo "::error::Tests failed under ASAN"
             exit 1
           fi
+
+  # Mirrors the release-windows.yml matrix (same php-version-list, so the same
+  # MSVC toolsets: VS2019 for <=8.3, VS2022 for >=8.4) and runs the test suite,
+  # so a Windows compile/test break surfaces on push instead of at release time
+  # when the asset upload is all-or-nothing.
+  windows-matrix:
+    name: Resolve Windows matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: matrix
+        uses: php/php-windows-builder/extension-matrix@v1
+        with:
+          php-version-list: '8.1, 8.2, 8.3, 8.4, 8.5'
+
+  windows:
+    name: Windows ${{ matrix.php-version }} ${{ matrix.ts }} ${{ matrix.arch }}
+    needs: windows-matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.windows-matrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: php/php-windows-builder/extension@v1
+        with:
+          php-version: ${{ matrix.php-version }}
+          arch: ${{ matrix.arch }}
+          ts: ${{ matrix.ts }}
+          run-tests: 'true'
