@@ -493,3 +493,47 @@ PHP_FUNCTION(dm_soundex)
 	dms_set_free(&out);
 	smart_str_free(&cleaned);
 }
+
+/* Encode `input` into its Daitch-Mokotoff code set. */
+static void dms_codes(zend_string *input, dms_set *out)
+{
+	smart_str cleaned = {0};
+
+	dms_set_init(out);
+	if (ZSTR_LEN(input) == 0) {
+		return;
+	}
+	dms_cleanup(ZSTR_VAL(input), ZSTR_LEN(input), &cleaned);
+	smart_str_0(&cleaned);
+	dms_encode(cleaned.s ? ZSTR_VAL(cleaned.s) : "",
+	           cleaned.s ? ZSTR_LEN(cleaned.s) : 0, out);
+	smart_str_free(&cleaned);
+}
+
+PHP_FUNCTION(dm_soundex_match)
+{
+	zend_string *a, *b;
+	dms_set sa, sb;
+	int i;
+	zend_bool matched = 0;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_STR(a)
+		Z_PARAM_STR(b)
+	ZEND_PARSE_PARAMETERS_END();
+
+	dms_codes(a, &sa);
+	dms_codes(b, &sb);
+
+	for (i = 0; i < sa.n; i++) {
+		if (dms_set_find(&sb, sa.b[i].code) >= 0) {
+			matched = 1;
+			break;
+		}
+	}
+
+	dms_set_free(&sa);
+	dms_set_free(&sb);
+
+	RETURN_BOOL(matched);
+}

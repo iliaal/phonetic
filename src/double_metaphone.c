@@ -760,3 +760,71 @@ PHP_FUNCTION(double_metaphone)
 	smart_str_free(&primary);
 	smart_str_free(&secondary);
 }
+
+/* Fold + encode one string into its untruncated primary/alternate codes. */
+static void dm_codes(const char *in, size_t len, smart_str *primary, smart_str *secondary)
+{
+	smart_str folded = {0};
+
+	dm_fold(in, len, &folded);
+	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
+		dm_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary);
+	}
+	if (primary->s != NULL) {
+		smart_str_0(primary);
+	}
+	if (secondary->s != NULL) {
+		smart_str_0(secondary);
+	}
+	smart_str_free(&folded);
+}
+
+/* Two non-empty codes of equal (capped) length comparing identical. */
+static zend_always_inline int dm_code_eq(const smart_str *x, const smart_str *y, size_t cap)
+{
+	size_t xl = x->s ? ZSTR_LEN(x->s) : 0;
+	size_t yl = y->s ? ZSTR_LEN(y->s) : 0;
+
+	if (xl > cap) xl = cap;
+	if (yl > cap) yl = cap;
+	if (xl == 0 || xl != yl) {
+		return 0;
+	}
+	return memcmp(ZSTR_VAL(x->s), ZSTR_VAL(y->s), xl) == 0;
+}
+
+PHP_FUNCTION(double_metaphone_match)
+{
+	zend_string *a, *b;
+	zend_long max_length = 4;
+	smart_str pa = {0}, sa = {0}, pb = {0}, sb = {0};
+	size_t cap;
+	int result = 0;
+
+	ZEND_PARSE_PARAMETERS_START(2, 3)
+		Z_PARAM_STR(a)
+		Z_PARAM_STR(b)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(max_length)
+	ZEND_PARSE_PARAMETERS_END();
+
+	dm_codes(ZSTR_VAL(a), ZSTR_LEN(a), &pa, &sa);
+	dm_codes(ZSTR_VAL(b), ZSTR_LEN(b), &pb, &sb);
+
+	/* max_length <= 0 means "no limit": compare the full codes. */
+	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
+
+	if (dm_code_eq(&pa, &pb, cap)) {
+		result = 2;                                       /* primaries agree */
+	} else if (dm_code_eq(&pa, &sb, cap) || dm_code_eq(&sa, &pb, cap)
+			|| dm_code_eq(&sa, &sb, cap)) {
+		result = 1;                                       /* an alternate crosses */
+	}
+
+	smart_str_free(&pa);
+	smart_str_free(&sa);
+	smart_str_free(&pb);
+	smart_str_free(&sb);
+
+	RETURN_LONG(result);
+}

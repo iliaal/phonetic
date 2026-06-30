@@ -1299,6 +1299,102 @@ PHP_FUNCTION(bmpm)
 	efree(result);
 }
 
+/* Do the two '|'-separated phoneme sets share a token? Empty sets never
+ * match, so two unencodable inputs are not treated as homophones. */
+static zend_bool bmpm_tokens_intersect(const char *a, size_t al, const char *b, size_t bl)
+{
+	size_t i = 0;
+
+	if (al == 0 || bl == 0) {
+		return 0;
+	}
+	while (i < al) {
+		size_t j = i;
+		size_t tlen;
+		while (j < al && a[j] != '|') {
+			j++;
+		}
+		tlen = j - i;
+		if (tlen > 0) {
+			size_t p = 0;
+			while (p < bl) {
+				size_t q = p;
+				while (q < bl && b[q] != '|') {
+					q++;
+				}
+				if (q - p == tlen && memcmp(a + i, b + p, tlen) == 0) {
+					return 1;
+				}
+				p = q + 1;
+			}
+		}
+		i = j + 1;
+	}
+	return 0;
+}
+
+PHP_FUNCTION(bmpm_match)
+{
+	zend_string *a, *b;
+	zend_long name_type = BMPM_GEN;
+	zend_long accuracy = BMPM_APPROX;
+	zend_string *language = NULL;
+	char *ra, *rb;
+	size_t ral = 0, rbl = 0;
+	int lang_idx = -1;
+	zend_bool matched;
+
+	ZEND_PARSE_PARAMETERS_START(2, 5)
+		Z_PARAM_STR(a)
+		Z_PARAM_STR(b)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(name_type)
+		Z_PARAM_LONG(accuracy)
+		Z_PARAM_STR(language)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (name_type != BMPM_GEN && name_type != BMPM_ASH && name_type != BMPM_SEP) {
+		zend_argument_value_error(3, "must be one of BMPM_GENERIC, BMPM_ASHKENAZI, or BMPM_SEPHARDIC");
+		RETURN_THROWS();
+	}
+	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
+		zend_argument_value_error(4, "must be either BMPM_APPROX or BMPM_EXACT");
+		RETURN_THROWS();
+	}
+	if (ZSTR_LEN(a) > (size_t) INT_MAX) {
+		zend_argument_value_error(1, "is too long");
+		RETURN_THROWS();
+	}
+	if (ZSTR_LEN(b) > (size_t) INT_MAX) {
+		zend_argument_value_error(2, "is too long");
+		RETURN_THROWS();
+	}
+	if (language != NULL && ZSTR_LEN(language) > 0) {
+		lang_idx = lang_index((int) name_type, ZSTR_VAL(language), ZSTR_LEN(language));
+		if (lang_idx < 0) {
+			zend_argument_value_error(5, "\"%s\" is not a known language for the given name type",
+			                          ZSTR_VAL(language));
+			RETURN_THROWS();
+		}
+	}
+
+	if (lang_idx >= 0) {
+		langset_t ls = (langset_t) (1u << lang_idx);
+		ra = encode_core((int) name_type, (int) accuracy, ls, ZSTR_VAL(a), ZSTR_LEN(a), &ral, 0);
+		rb = encode_core((int) name_type, (int) accuracy, ls, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, 0);
+	} else {
+		ra = encode_guess((int) name_type, (int) accuracy, ZSTR_VAL(a), ZSTR_LEN(a), &ral, 0);
+		rb = encode_guess((int) name_type, (int) accuracy, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, 0);
+	}
+
+	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
+
+	efree(ra);
+	efree(rb);
+
+	RETURN_BOOL(matched);
+}
+
 /* ---------------------------------------------------------------------- */
 /* MINIT / MSHUTDOWN: build and free the read-only dispatch indices        */
 /* ---------------------------------------------------------------------- */

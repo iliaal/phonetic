@@ -10,7 +10,7 @@ ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-
 if (PHP_PHONETIC != "no") {
 	EXTENSION("phonetic", "phonetic.c");
 	ADD_SOURCES(configure_module_dirname + "/src",
-		"double_metaphone.c bmpm.c dm_soundex.c", "phonetic");
+		"double_metaphone.c bmpm.c dm_soundex.c nysiis.c match_rating.c", "phonetic");
 	// php_phonetic.h / phonetic_arginfo.h live at the module root; bmpm_data.h
 	// lives in src/ next to the engines that include it.
 	ADD_FLAG("CFLAGS_PHONETIC",
