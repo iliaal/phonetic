@@ -1,6 +1,6 @@
 # phonetic
 
-Native phonetic matching for PHP: **Double Metaphone**, **Beider-Morse Phonetic Matching (BMPM)**, **Daitch-Mokotoff Soundex**, **NYSIIS**, and **Match Rating Approach**, the phonetic name-matching encoders that PHP core does not ship — plus ready-made comparison helpers that answer "do these two names sound alike?" directly.
+Native phonetic matching for PHP: **Double Metaphone**, **Beider-Morse Phonetic Matching (BMPM)**, **Daitch-Mokotoff Soundex**, **NYSIIS**, and **Match Rating Approach**, the phonetic name-matching encoders that PHP core does not ship. It also ships comparison helpers that answer "do these two names sound alike?" directly.
 
 PHP core has `soundex()` and `metaphone()`, but not these, which are the standard tools for fuzzy name matching, record linkage, and genealogy search across spelling and transliteration variants.
 
@@ -16,7 +16,7 @@ PHP core has `soundex()` and `metaphone()`, but not these, which are the standar
 | Relative speed | fast (1.0x) | slowest (~60x) | middle (~2.3x) | fast (0.42x) | fastest (0.24x) |
 | Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data | clean-room published algorithm | clean-room published algorithm |
 
-Rule of thumb: reach for Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy where it is the field standard. **NYSIIS** and **Match Rating Approach** are lighter, single-key English/American encoders — useful as alternate index keys or a second opinion alongside Double Metaphone.
+Rule of thumb: reach for Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy where it is the field standard. **NYSIIS** and **Match Rating Approach** are lighter, single-key English/American encoders, useful as alternate index keys or a second opinion alongside Double Metaphone.
 
 ## API
 
@@ -74,7 +74,7 @@ The classic algorithm truncates to 6 characters; `max_length = 0` (or negative) 
 
 ### Match Rating Approach
 
-Compact codex (Western Airlines, 1977) designed to be paired with its own similarity test rather than compared for equality.
+Compact codex (Western Airlines, 1977). Pair it with its own similarity test instead of comparing codexes for equality.
 
 ```php
 match_rating(string $string): string
@@ -83,7 +83,7 @@ match_rating("Smith");                     // "SMTH"
 match_rating("Catherine");                 // "CTHRN"
 ```
 
-Use `match_rating_compare()` (below) for the actual homophone decision — it applies the algorithm's length-and-rating rules, which plain codex equality does not.
+Use `match_rating_compare()` (below) for the actual homophone decision. It applies the algorithm's length-and-rating rules that plain codex equality skips.
 
 ## Comparison helpers
 
@@ -114,7 +114,7 @@ match_rating_compare("Catherine", "Kathryn");            // true
 
 ## Usage
 
-For a one-off "do these sound alike?" check, use the comparison helpers directly — they apply the correct per-algorithm logic:
+For a one-off "do these sound alike?" check, use the comparison helpers directly. Each applies the correct per-algorithm logic:
 
 ```php
 double_metaphone_match("Catherine", "Kathryn");   // 2 (strong)
@@ -175,7 +175,11 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 - `double_metaphone()` targets ASCII/Latin; non-letter bytes are skipped, matching
   Apache Commons Codec.
 - `nysiis()` and `match_rating()` operate on ASCII letters; `match_rating()`
-  additionally folds the Latin-1/Latin-Extended accent set the reference handles.
+  also folds the Latin-1/Latin-Extended accent set the reference handles.
+- `bmpm()` cost grows faster than linearly with input length (roughly n^1.45 in
+  practice, because it joins every word and runs three rule passes over the
+  result). A single name is short, but a multi-kilobyte string can take seconds,
+  so cap untrusted input length before you encode it.
 
 ## Install
 

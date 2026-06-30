@@ -463,7 +463,9 @@ $b[] = '';
 $b[] = '#endif /* PHP_BMPM_DATA_H */';
 $b[] = '';
 
-file_put_contents($out, implode("\n", $b));
+if (file_put_contents($out, implode("\n", $b)) === false) {
+    fail("could not write $out");
+}
 
 /* ---------------------------------------------------------------------------
  * Stats
