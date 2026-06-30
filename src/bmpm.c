@@ -419,16 +419,16 @@ static int regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int 
 	return atoms_find(as, ae, atoms, na, seg, sn);
 }
 
-/* Match a rule's raw left/right context. side 0 = left  (regex = raw + "$"),
- * side 1 = right (regex = "^" + raw). Reproduces Commons Codec's pattern()
- * dispatch byte for byte, including its literal treatment of "." and the
- * fall-through to the general matcher for compound contexts. */
-static int ctx_match(const char *raw, int side, const uint32_t *seg, int sn)
+/* Build the anchored, decoded context regex for a rule context at MINIT.
+ * side 0 = left (raw + "$"), side 1 = right ("^" + raw). The run-time matcher
+ * ctx_match_pre consumes the result, so the per-match u8_decode + R-assembly is
+ * paid once at module load instead of on every candidate rule. */
+static uint32_t *build_ctx_R(const char *raw, int side, int *Rn_out)
 {
 	uint32_t rb[128];
 	int rn = u8_decode_buf(raw, rb, 128);
-	uint32_t R[130];
 	int Rn = 0, i;
+	uint32_t *R = pemalloc((size_t) (rn + 1) * sizeof(uint32_t), 1);
 
 	if (side == 1) {
 		R[Rn++] = '^';
@@ -437,7 +437,17 @@ static int ctx_match(const char *raw, int side, const uint32_t *seg, int sn)
 		for (i = 0; i < rn; i++) R[Rn++] = rb[i];
 		R[Rn++] = '$';
 	}
+	*Rn_out = Rn;
+	return R;
+}
 
+/* Match a pre-decoded rule context (from build_ctx_R) against seg. Reproduces
+ * Commons Codec's pattern() dispatch byte for byte, including its literal
+ * treatment of "." and the fall-through to the general matcher for compound
+ * contexts. */
+static int ctx_match_pre(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
+{
+	int i;
 	int sw = Rn > 0 && R[0] == '^';
 	int ew = Rn > 0 && R[Rn - 1] == '$';
 	const uint32_t *content = R + (sw ? 1 : 0);
@@ -681,6 +691,10 @@ static void pb_apply(pbuilder *pb, const char *raw_phoneme, int nt, int max)
 typedef struct {
 	const uint32_t *pat;
 	int             plen;
+	uint32_t       *lctx;    /* decoded lcontext + '$' (side 0), built at MINIT */
+	int             lctx_n;
+	uint32_t       *rctx;    /* decoded '^' + rcontext (side 1) */
+	int             rctx_n;
 } rule_decoded;
 
 /* Per-ruleset dispatch index. Rules are bucketed by their pattern's first code
@@ -746,8 +760,8 @@ static void run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *
 				int plen = ix->decoded[r].plen;
 				if (i + plen > n) continue;
 				if (!seqeq(cp + i, plen, pat, plen)) continue;
-				if (!ctx_match(rule->rcontext, 1, cp + i + plen, n - i - plen)) continue;
-				if (!ctx_match(rule->lcontext, 0, cp, i)) continue;
+				if (!ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
+				if (!ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, cp, i)) continue;
 				pb_apply(pb, rule->phoneme, nt, max);
 				adv = plen;
 				break;
@@ -809,8 +823,8 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 					int plen = ix->decoded[r].plen;
 					if (i + plen > tn) continue;
 					if (!seqeq(tcp + i, plen, pat, plen)) continue;
-					if (!ctx_match(rule->rcontext, 1, tcp + i + plen, tn - i - plen)) continue;
-					if (!ctx_match(rule->lcontext, 0, tcp, i)) continue;
+					if (!ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
+					if (!ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
 					pb_apply(&sub, rule->phoneme, nt, max);
 					found = 1;
 					adv = plen;
@@ -1278,6 +1292,8 @@ static void build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 		u8_decode_buf(rs->rules[i].pattern, ix->arena + pos, pl);
 		ix->decoded[i].pat = ix->arena + pos;
 		pos += (size_t) pl;
+		ix->decoded[i].lctx = build_ctx_R(rs->rules[i].lcontext, 0, &ix->decoded[i].lctx_n);
+		ix->decoded[i].rctx = build_ctx_R(rs->rules[i].rcontext, 1, &ix->decoded[i].rctx_n);
 	}
 
 	/* distinct first code points, sorted ascending */
@@ -1355,7 +1371,14 @@ void bmpm_mshutdown(void)
 	if (g_rs_index) {
 		for (i = 0; i < bmpm_rulesets_count; i++) {
 			ruleset_index *ix = &g_rs_index[i];
-			if (ix->decoded) pefree(ix->decoded, 1);
+			if (ix->decoded) {
+				size_t d;
+				for (d = 0; d < ix->count; d++) {
+					if (ix->decoded[d].lctx) pefree(ix->decoded[d].lctx, 1);
+					if (ix->decoded[d].rctx) pefree(ix->decoded[d].rctx, 1);
+				}
+				pefree(ix->decoded, 1);
+			}
 			if (ix->arena) pefree(ix->arena, 1);
 			if (ix->order) pefree(ix->order, 1);
 			if (ix->bk_cp) pefree(ix->bk_cp, 1);
