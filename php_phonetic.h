@@ -15,7 +15,7 @@
 
 #include "php.h"
 
-#define PHP_PHONETIC_VERSION "0.1.0"
+#define PHP_PHONETIC_VERSION "0.2.0"
 
 extern zend_module_entry phonetic_module_entry;
 #define phpext_phonetic_ptr &phonetic_module_entry

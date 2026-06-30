@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-30
+
+### Added
+
+- `nysiis(string $string, int $max_length = 6): string`. NYSIIS encoder (clean-room), with parity to Apache Commons Codec's `Nysiis`. `$max_length <= 0` returns the full, non-truncated key.
+- `match_rating(string $string): string`. Match Rating Approach codex (clean-room), with parity to Apache Commons Codec.
+- `double_metaphone_match(string $a, string $b, int $max_length = 4): int`. Double Metaphone match strength: `2` when the primary keys agree, `1` when an alternate key crosses, `0` for no match.
+- `bmpm_match(string $a, string $b, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): bool`. True when two names share a Beider-Morse phoneme token.
+- `dm_soundex_match(string $a, string $b): bool`. True when two names share a Daitch-Mokotoff code.
+- `nysiis_match(string $a, string $b, int $max_length = 6): bool`. True when two names produce the same NYSIIS key.
+- `match_rating_compare(string $a, string $b): bool`. Match Rating Approach homophone test (`isEncodeEquals`), applying the length and minimum-rating rules.
+- Prebuilt binaries attached to releases: Linux (glibc x86_64 and arm64) and macOS (arm64) for PHP 8.4 and 8.5, alongside the existing Windows DLLs.
+
+### Fixed
+
+- `match_rating()`: count UTF-8 code points, not bytes, in the trivial-input
+  guard, so a lone multi-byte letter has no code (`match_rating("é")` is now `""`).
+- `match_rating()`: expand `ß` to `SS` before folding accents, so
+  `match_rating("Straße")` returns `"STRS"`.
+
+### Security
+
+- `dm_soundex()` and `dm_soundex_match()`: reject input over 4096 bytes with a
+  `ValueError`, so untrusted long input cannot become a multi-second CPU sink.
+- `bmpm()`: skip and reject zero-length rule patterns, closing a latent
+  infinite-loop path against a corrupted rule set.
+
+### Performance
+
+- `dm_soundex()`: O(1) hashed branch-set dedup for branchy input (threshold-gated
+  so short names keep the linear path), making long input scale linearly.
+- `match_rating_compare()`: stack scratch buffer in the comparison pass instead of
+  two heap allocations per call.
+
 ## [0.1.0] - 2026-06-30
 
 ### Added
@@ -40,5 +74,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/iliaal/phonetic/releases/tag/0.2.0
 [0.1.0]: https://github.com/iliaal/phonetic/releases/tag/0.1.0
