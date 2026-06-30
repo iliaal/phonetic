@@ -490,11 +490,18 @@ static int ctx_match_pre(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
 /* Phoneme builder                                                        */
 /* ---------------------------------------------------------------------- */
 
+/* Phoneme text is small-string optimized: when tn <= PHON_INL the bytes live
+ * in inl[] and t is NULL, so most phonemes avoid a heap allocation. t is never
+ * a self-pointer, so realloc/memmove of a phon_t array stay valid; read text
+ * through PHON_T(). Invariant: t != NULL  <=>  tn > PHON_INL. */
+#define PHON_INL 23
 typedef struct {
 	char     *t;
 	size_t    tn;
 	langset_t langs;
+	char      inl[PHON_INL + 1];
 } phon_t;
+#define PHON_T(p) ((p)->t ? (p)->t : (p)->inl)
 
 typedef struct {
 	phon_t *a;
@@ -521,14 +528,24 @@ static void pb_reserve(pbuilder *pb, size_t need)
 
 static void pb_push(pbuilder *pb, const char *lt, size_t ln, const char *rt, size_t rn, langset_t langs)
 {
+	phon_t *p;
+	size_t tot = ln + rn;
+	char *dst;
+
 	pb_reserve(pb, pb->n + 1);
-	char *t = emalloc(ln + rn + 1);
-	if (ln) memcpy(t, lt, ln);
-	if (rn) memcpy(t + ln, rt, rn);
-	t[ln + rn] = '\0';
-	pb->a[pb->n].t = t;
-	pb->a[pb->n].tn = ln + rn;
-	pb->a[pb->n].langs = langs;
+	p = &pb->a[pb->n];
+	if (tot <= PHON_INL) {
+		p->t = NULL;
+		dst = p->inl;
+	} else {
+		p->t = emalloc(tot + 1);
+		dst = p->t;
+	}
+	if (ln) memcpy(dst, lt, ln);
+	if (rn) memcpy(dst + ln, rt, rn);
+	dst[tot] = '\0';
+	p->tn = tot;
+	p->langs = langs;
 	pb->n++;
 }
 
@@ -552,13 +569,20 @@ static void pb_append_all(pbuilder *pb, const char *s, size_t sn)
 	size_t i;
 	for (i = 0; i < pb->n; i++) {
 		phon_t *p = &pb->a[i];
-		char *nt = emalloc(p->tn + sn + 1);
-		if (p->tn) memcpy(nt, p->t, p->tn);
-		memcpy(nt + p->tn, s, sn);
-		nt[p->tn + sn] = '\0';
-		efree(p->t);
-		p->t = nt;
-		p->tn += sn;
+		size_t tot = p->tn + sn;
+		if (tot <= PHON_INL) {
+			/* src is inline here (heap text already exceeds PHON_INL) */
+			memcpy(p->inl + p->tn, s, sn);
+			p->inl[tot] = '\0';
+		} else {
+			char *nt = emalloc(tot + 1);
+			if (p->tn) memcpy(nt, PHON_T(p), p->tn);
+			memcpy(nt + p->tn, s, sn);
+			nt[tot] = '\0';
+			if (p->t) efree(p->t);
+			p->t = nt;
+		}
+		p->tn = tot;
 	}
 }
 
@@ -673,7 +697,7 @@ static void pb_apply(pbuilder *pb, const char *raw_phoneme, int nt, int max)
 			langset_t ls = ls_restrict(pb->a[li].langs, alts[ai].langs);
 			if (ls == LS_NONE) continue;
 			if ((int) out.n < max) {
-				pb_push(&out, pb->a[li].t, pb->a[li].tn, alts[ai].t, (size_t) alts[ai].tn, ls);
+				pb_push(&out, PHON_T(&pb->a[li]), pb->a[li].tn, alts[ai].t, (size_t) alts[ai].tn, ls);
 				if ((int) out.n >= max) { done = 1; break; }
 			}
 		}
@@ -809,7 +833,7 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 
 		pb_init(&sub);
 		pb_seed(&sub, P->langs);
-		tcp = u8_decode(P->t, P->tn, &tn);
+		tcp = u8_decode(PHON_T(P), P->tn, &tn);
 
 		i = 0;
 		while (i < tn) {
@@ -844,7 +868,7 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 			size_t k;
 			int merged = 0;
 			for (k = 0; k < result.n; k++) {
-				if (result.a[k].tn == np->tn && memcmp(result.a[k].t, np->t, np->tn) == 0) {
+				if (result.a[k].tn == np->tn && memcmp(PHON_T(&result.a[k]), PHON_T(np), np->tn) == 0) {
 					result.a[k].langs = ls_merge(result.a[k].langs, np->langs);
 					merged = 1;
 					break;
@@ -854,16 +878,15 @@ static void apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 				size_t pos = 0;
 				pb_reserve(&result, result.n + 1);
 				while (pos < result.n &&
-				       phon_cmp(result.a[pos].t, result.a[pos].tn, np->t, np->tn) < 0) {
+				       phon_cmp(PHON_T(&result.a[pos]), result.a[pos].tn, PHON_T(np), np->tn) < 0) {
 					pos++;
 				}
 				memmove(&result.a[pos + 1], &result.a[pos],
 				        (result.n - pos) * sizeof(phon_t));
-				/* Move the sub-builder's owned phoneme text into the result
-				 * instead of copying it; null the source so pb_free skips it. */
-				result.a[pos].t = np->t;
-				result.a[pos].tn = np->tn;
-				result.a[pos].langs = np->langs;
+				/* Move the whole phoneme (heap pointer or inline bytes) into the
+				 * result, then null the source's heap pointer so pb_free skips
+				 * it; inline entries carry no pointer and need no cleanup. */
+				result.a[pos] = *np;
 				np->t = NULL;
 				result.n++;
 			}
@@ -881,7 +904,7 @@ static char *pb_makestring(pbuilder *pb, size_t *outlen)
 	size_t i;
 	for (i = 0; i < pb->n; i++) {
 		if (i) smart_str_appendc(&s, '|');
-		smart_str_appendl(&s, pb->a[i].t, pb->a[i].tn);
+		smart_str_appendl(&s, PHON_T(&pb->a[i]), pb->a[i].tn);
 	}
 	smart_str_0(&s);
 	if (s.s == NULL) {
