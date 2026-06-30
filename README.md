@@ -4,6 +4,24 @@ Native phonetic matching for PHP: **Double Metaphone**, **Beider-Morse Phonetic 
 
 PHP core has `soundex()` and `metaphone()`, but not these, which are the standard tools for fuzzy name matching, record linkage, and genealogy search across spelling and transliteration variants.
 
+![phonetic](images/phonetic-hero.jpg)
+
+## Quick Start
+
+Install via [PIE](https://github.com/php/pie) (requires PHP 8.1 or later):
+
+```sh
+pie install iliaal/phonetic
+```
+
+Then ask whether two names sound alike, no userland matching logic required:
+
+```php
+double_metaphone_match("Catherine", "Kathryn");   // 2  (strong match)
+dm_soundex_match("Moskowitz", "Moskovitz");        // true
+bmpm_match("Peterson", "Petersen");                // true
+```
+
 ## Choosing an algorithm
 
 | | Double Metaphone | BMPM | Daitch-Mokotoff Soundex | NYSIIS | Match Rating |
@@ -185,15 +203,19 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   per-character branch work so an untrusted multi-megabyte string can't turn the
   encoder into a CPU sink.
 
-## Install
+## 🔗 Native PHP extensions
 
-Via [PIE](https://github.com/php/pie):
+Companion native PHP extensions:
 
-```sh
-pie install iliaal/phonetic
-```
-
-Requires PHP 8.1 or later.
+- **[php_excel](https://github.com/iliaal/php_excel)**: native Excel I/O via LibXL. 7-10× faster than PhpSpreadsheet, full XLS/XLSX with formulas, formatting, and styling.
+- **[mdparser](https://github.com/iliaal/mdparser)**: native CommonMark + GFM markdown parser via md4c. 15-30× faster than pure-PHP libraries.
+- **[php_clickhouse](https://github.com/iliaal/php_clickhouse)**: native ClickHouse client speaking the wire protocol directly. Picks up where SeasClick left off.
+- **[pdo_duckdb](https://github.com/iliaal/pdo_duckdb)**: PDO driver for DuckDB, analytical SQL in your PHP stack.
+- **[fastjson](https://github.com/iliaal/fastjson)**: drop-in faster `ext/json`, backed by yyjson. 6× encode, 2.7× decode, 5× validate.
+- **[phpser](https://github.com/iliaal/phpser)**: decoder-optimized binary serializer for cache workloads. Faster than igbinary on packed numerics and DTO batches.
+- **[fast_uuid](https://github.com/iliaal/fast_uuid)**: high-throughput UUID generation (v1/v4/v7), batched CSPRNG and SIMD hex formatter, ramsey-compatible API.
+- **[fastchart](https://github.com/iliaal/fastchart)**: native chart-rendering extension. 38 chart types behind one fluent OO API, SVG-canonical with PNG/JPG/WebP and optional PDF output.
+- **[statgrab](https://github.com/iliaal/statgrab)**: system statistics (CPU, memory, disk, network) via libstatgrab, no parsing /proc by hand.
 
 ## License
 
@@ -205,3 +227,7 @@ the Apache License 2.0; its notice is included in Section 2 of the LICENSE file.
 Double Metaphone, NYSIIS, and Match Rating Approach are clean-room
 implementations of their published algorithms, with Commons Codec used only as
 the parity-test oracle (no third-party data).
+
+---
+
+[Follow @iliaa on X](https://x.com/iliaa) • [Blog](https://ilia.ws) • If this matched the names exact comparison missed, ⭐ star it!
