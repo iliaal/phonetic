@@ -911,6 +911,8 @@ typedef struct {
 	int       na;
 	langset_t mask;
 	int       accept;
+	uint32_t *req_lit;   /* literal atoms the rule needs present to match */
+	int       req_n;
 } lang_parsed;
 
 typedef struct {
@@ -935,12 +937,23 @@ static langset_t guess_languages(int nt, const char *input, size_t len)
 	uint32_t *cp = u8_decode(input, len, &n);
 	const langset_index *li = &g_lang_index[find_lang_slot(nt)];
 	langset_t mask = ls_full(nt);
+	uint64_t present[2] = { 0, 0 };   /* which ASCII code points the input contains */
 	size_t r;
 
-	for (i = 0; i < n; i++) cp[i] = lc_cp(cp[i]);
+	for (i = 0; i < n; i++) {
+		uint32_t c = lc_cp(cp[i]);
+		cp[i] = c;
+		if (c < 128) present[c >> 6] |= (uint64_t) 1 << (c & 63);
+	}
 
 	for (r = 0; r < li->count; r++) {
 		const lang_parsed *lp = &li->rules[r];
+		int q, skip = 0;
+		for (q = 0; q < lp->req_n; q++) {
+			uint32_t L = lp->req_lit[q];
+			if (L < 128 && !(present[L >> 6] & ((uint64_t) 1 << (L & 63)))) { skip = 1; break; }
+		}
+		if (skip) continue;
 		if (atoms_find(lp->as, lp->ae, lp->atoms, lp->na, cp, n)) {
 			if (lp->accept) mask &= lp->mask;
 			else mask &= ~lp->mask;
@@ -1349,6 +1362,17 @@ static void build_lang_index(const bmpm_lang_set *S, int nt, langset_index *li)
 		if (na) memcpy(lp->atoms, tmp, (size_t) na * sizeof(atom_t));
 		lp->mask = parse_lang_list(nt, S->rules[r].languages);
 		lp->accept = S->rules[r].accept;
+
+		/* Literal atoms must all appear in the input for any match, so
+		 * guess_languages can skip the substring scan when one is absent. */
+		{
+			int q, rc = 0;
+			for (q = 0; q < na; q++) if (!tmp[q].is_class) rc++;
+			lp->req_lit = pemalloc((rc ? (size_t) rc : 1) * sizeof(uint32_t), 1);
+			lp->req_n = rc;
+			rc = 0;
+			for (q = 0; q < na; q++) if (!tmp[q].is_class) lp->req_lit[rc++] = tmp[q].lit;
+		}
 	}
 }
 
@@ -1394,6 +1418,7 @@ void bmpm_mshutdown(void)
 			for (r = 0; r < li->count; r++) {
 				if (li->rules[r].R) pefree(li->rules[r].R, 1);
 				if (li->rules[r].atoms) pefree(li->rules[r].atoms, 1);
+				if (li->rules[r].req_lit) pefree(li->rules[r].req_lit, 1);
 			}
 			if (li->rules) pefree(li->rules, 1);
 		}
