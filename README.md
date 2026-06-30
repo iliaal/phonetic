@@ -13,7 +13,7 @@ PHP core has `soundex()` and `metaphone()`, but not these three, which are the s
 | Strongest for | English and general Latin-script names | cross-language and transliteration variants (Slavic, Germanic, Hebrew, Romance) | Eastern-European and Ashkenazi surnames, genealogy |
 | Spelling-variant recall | good | highest | high, within its language model |
 | Ambiguity handling | up to 2 keys | many tokens | multiple codes |
-| Relative speed | fastest (1.0x) | slowest (~50x) | middle (~16x) |
+| Relative speed | fastest (1.0x) | slowest (~40x) | middle (~3x) |
 | Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data |
 
 Rule of thumb: reach for Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy where it is the field standard.
@@ -95,10 +95,10 @@ Single-name encode, warm, optimized non-ASan PHP 8.4 on one core, over a represe
 | function | per call | throughput | relative |
 |---|---|---|---|
 | `double_metaphone()` | ~0.18 µs | ~5.7M/sec | 1.0x |
-| `dm_soundex()` | ~2.9 µs | ~340k/sec | ~16x slower |
-| `bmpm()` | ~9.7 µs | ~105k/sec | ~54x slower |
+| `dm_soundex()` | ~0.5 µs | ~1.9M/sec | ~3x slower |
+| `bmpm()` | ~7.3 µs | ~135k/sec | ~40x slower |
 
-Double Metaphone is a single linear pass over the input, so it's by far the cheapest. Daitch-Mokotoff branches on ambiguous letters and dedups the resulting codes. BMPM is the heaviest: language detection, a main transliteration pass, and two final rule passes, expanding a Cartesian product of phoneme alternatives capped at 20 per word. When you know the language, passing an explicit `$language` skips auto-detection and can cut bmpm time several-fold, though the gain depends on the chosen language's ruleset. Choose BMPM for recall, not throughput.
+Double Metaphone is a single linear pass over the input, so it's the cheapest. Daitch-Mokotoff branches on ambiguous letters and dedups the resulting codes; a first-byte rule index keeps it fast. BMPM is the heaviest: language detection, a main transliteration pass, and two final rule passes, expanding a Cartesian product of phoneme alternatives capped at 20 per word. When you know the language, passing an explicit `$language` skips auto-detection and can cut bmpm time several-fold, though the gain depends on the chosen language's ruleset. Choose BMPM for recall, not throughput.
 
 ## Notes & limitations
 
