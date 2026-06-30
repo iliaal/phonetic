@@ -229,7 +229,8 @@ PHP_FUNCTION(nysiis_match)
 	ny_encode(ZSTR_VAL(b), ZSTR_LEN(b), max_length, &kb);
 
 	/* NYSIIS yields a single key; two names match when the keys are equal.
-	 * A name that produces no key (no letters) never matches. */
+	 * A name that produces no key never matches (consistent with the other
+	 * *_match helpers, where an empty/unencodable input is never a homophone). */
 	if (ka.s != NULL && kb.s != NULL) {
 		smart_str_0(&ka);
 		smart_str_0(&kb);

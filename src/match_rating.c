@@ -111,6 +111,25 @@ static uint32_t mra_u8(const char *s, size_t len, int *clen)
 	return c;
 }
 
+/* True when the string holds at most one code point (empty or a single
+ * character). The reference's trivial-input guard is `name.length() == 1`,
+ * i.e. character count, not byte count — so a single multi-byte letter must
+ * still count as one character, not encode as if it were several. */
+static int mra_trivial(const char *s, size_t len)
+{
+	size_t i = 0, cps = 0;
+
+	while (i < len) {
+		int clen;
+		(void) mra_u8(s + i, len - i, &clen);
+		i += (size_t) clen;
+		if (++cps > 1) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* Upper-case, strip the reference's punctuation set (- & ' . ,) and whitespace,
  * fold accents. Returns an emalloc'd buffer; *outlen gets its length. */
 static char *mra_clean(const char *src, size_t len, size_t *outlen)
@@ -129,6 +148,12 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 				continue;
 			}
 			out[n++] = (c >= 'a' && c <= 'z') ? (char) (c - ('a' - 'A')) : (char) c;
+		} else if (cp == 0x00DF) {
+			/* The reference upper-cases (ENGLISH) before folding accents, and
+			 * ß upper-cases to "SS"; reproduce that one expansion here. Other
+			 * case-expanding code points are out of scope (ASCII/Latin only). */
+			out[n++] = 'S';
+			out[n++] = 'S';
 		} else {
 			char a = mra_deaccent(cp);
 			if (a != 0) {
@@ -288,7 +313,7 @@ PHP_FUNCTION(match_rating)
 	ZEND_PARSE_PARAMETERS_END();
 
 	/* Trivial input (empty / single character) has no code. */
-	if (ZSTR_LEN(input) <= 1) {
+	if (mra_trivial(ZSTR_VAL(input), ZSTR_LEN(input))) {
 		RETURN_EMPTY_STRING();
 	}
 
@@ -310,7 +335,7 @@ PHP_FUNCTION(match_rating_compare)
 	ZEND_PARSE_PARAMETERS_END();
 
 	/* Trivial input never compares. */
-	if (ZSTR_LEN(a) <= 1 || ZSTR_LEN(b) <= 1) {
+	if (mra_trivial(ZSTR_VAL(a), ZSTR_LEN(a)) || mra_trivial(ZSTR_VAL(b), ZSTR_LEN(b))) {
 		RETURN_FALSE;
 	}
 	/* Identical (case-insensitive) raw inputs are homophones by definition. */

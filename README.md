@@ -6,15 +6,15 @@ PHP core has `soundex()` and `metaphone()`, but not these, which are the standar
 
 ## Choosing an algorithm
 
-| | Double Metaphone | BMPM | Daitch-Mokotoff Soundex |
-|---|---|---|---|
-| Output | primary + alternate key | language-aware token set | distinct 6-digit codes |
-| Two names match when | keys are equal | token sets intersect | code sets intersect |
-| Strongest for | English and general Latin-script names | cross-language and transliteration variants (Slavic, Germanic, Hebrew, Romance) | Eastern-European and Ashkenazi surnames, genealogy |
-| Spelling-variant recall | good | highest | high, within its language model |
-| Ambiguity handling | up to 2 keys | many tokens | multiple codes |
-| Relative speed | fast (1.0x) | slowest (~60x) | middle (~2.3x) |
-| Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data |
+| | Double Metaphone | BMPM | Daitch-Mokotoff Soundex | NYSIIS | Match Rating |
+|---|---|---|---|---|---|
+| Output | primary + alternate key | language-aware token set | distinct 6-digit codes | single key | compact codex |
+| Two names match when | keys are equal | token sets intersect | code sets intersect | keys are equal | clear the MRA similarity threshold |
+| Strongest for | English and general Latin-script names | cross-language and transliteration variants (Slavic, Germanic, Hebrew, Romance) | Eastern-European and Ashkenazi surnames, genealogy | American/English surnames | English names; ships its own similarity test |
+| Spelling-variant recall | good | highest | high, within its language model | good | good |
+| Ambiguity handling | up to 2 keys | many tokens | multiple codes | single key | single codex |
+| Relative speed | fast (1.0x) | slowest (~60x) | middle (~2.3x) | fast (0.42x) | fastest (0.24x) |
+| Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data | clean-room published algorithm | clean-room published algorithm |
 
 Rule of thumb: reach for Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy where it is the field standard. **NYSIIS** and **Match Rating Approach** are lighter, single-key English/American encoders — useful as alternate index keys or a second opinion alongside Double Metaphone.
 
