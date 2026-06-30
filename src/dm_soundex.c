@@ -28,6 +28,12 @@
 
 #define DMS_MAX 6
 
+/* A name is short; this generous byte ceiling never rejects a real one but
+ * bounds the per-character branch work, so untrusted input can't turn
+ * dm_soundex into a multi-second CPU sink. The hashed dedup keeps everything
+ * up to the cap fast; the cap is the hard backstop. */
+#define DMS_MAX_INPUT 4096
+
 /* ---------------------------------------------------------------------- */
 /* UTF-8 helpers                                                          */
 /* ---------------------------------------------------------------------- */
@@ -142,10 +148,19 @@ typedef struct {
 	int  last_null;           /* 1 while no replacement has been applied yet */
 } dms_branch;
 
+/* A branchy input can fork the set up to ~64 distinct codes; below this the
+ * per-push linear strcmp scan is cheaper than maintaining a hash, so normal
+ * (short) names never allocate or touch the hash. Above it, the O(set) scan
+ * per push becomes an O(set^2)-per-character CPU sink on long input, so we
+ * switch to an open-addressed index. */
+#define DMS_HASH_MIN 16
+
 typedef struct {
 	dms_branch *b;
 	int         n;
 	int         cap;
+	int        *hash;   /* open addressing: slot holds (b-index + 1); 0 = empty */
+	int         hmask;  /* (hash size - 1), a power-of-two mask; 0 when unbuilt */
 } dms_set;
 
 static void dms_set_init(dms_set *s)
@@ -153,6 +168,8 @@ static void dms_set_init(dms_set *s)
 	s->b = NULL;
 	s->n = 0;
 	s->cap = 0;
+	s->hash = NULL;
+	s->hmask = 0;
 }
 
 static void dms_set_free(dms_set *s)
@@ -160,9 +177,46 @@ static void dms_set_free(dms_set *s)
 	if (s->b) {
 		efree(s->b);
 	}
+	if (s->hash) {
+		efree(s->hash);
+	}
 	s->b = NULL;
 	s->n = 0;
 	s->cap = 0;
+	s->hash = NULL;
+	s->hmask = 0;
+}
+
+static zend_always_inline unsigned dms_code_hash(const char *s)
+{
+	unsigned h = 2166136261u;        /* FNV-1a over the short digit string */
+	while (*s) {
+		h ^= (unsigned char) *s++;
+		h *= 16777619u;
+	}
+	return h;
+}
+
+/* (Re)build the index over the current b[0..n-1], sized to keep load <= 0.5. */
+static void dms_hash_build(dms_set *s)
+{
+	int size = 32, i;
+
+	while (size < s->cap * 2) {
+		size <<= 1;
+	}
+	if (s->hash) {
+		efree(s->hash);
+	}
+	s->hash = ecalloc((size_t) size, sizeof(int));
+	s->hmask = size - 1;
+	for (i = 0; i < s->n; i++) {
+		unsigned slot = dms_code_hash(s->b[i].code) & (unsigned) s->hmask;
+		while (s->hash[slot]) {
+			slot = (slot + 1) & (unsigned) s->hmask;
+		}
+		s->hash[slot] = i + 1;
+	}
 }
 
 static void dms_set_push(dms_set *s, const dms_branch *br)
@@ -170,14 +224,41 @@ static void dms_set_push(dms_set *s, const dms_branch *br)
 	if (s->n == s->cap) {
 		s->cap = s->cap ? s->cap * 2 : 8;
 		s->b = erealloc(s->b, (size_t) s->cap * sizeof(dms_branch));
+		if (s->hash) {
+			dms_hash_build(s);   /* resize + reindex after b[] moved */
+		}
 	}
-	s->b[s->n++] = *br;
+	s->b[s->n] = *br;
+	if (!s->hash && s->n + 1 >= DMS_HASH_MIN) {
+		dms_hash_build(s);       /* index the existing entries once we get big */
+	}
+	if (s->hash) {
+		unsigned slot = dms_code_hash(br->code) & (unsigned) s->hmask;
+		while (s->hash[slot]) {
+			slot = (slot + 1) & (unsigned) s->hmask;
+		}
+		s->hash[slot] = s->n + 1;
+	}
+	s->n++;
 }
 
-/* Index of a branch whose accumulated code equals `code`, or -1. */
+/* Index of a branch whose accumulated code equals `code`, or -1. Insertion
+ * order in b[] is preserved either way, so output is identical to the scan. */
 static int dms_set_find(const dms_set *s, const char *code)
 {
 	int i;
+
+	if (s->hash) {
+		unsigned slot = dms_code_hash(code) & (unsigned) s->hmask;
+		int idx;
+		while ((idx = s->hash[slot]) != 0) {
+			if (strcmp(s->b[idx - 1].code, code) == 0) {
+				return idx - 1;
+			}
+			slot = (slot + 1) & (unsigned) s->hmask;
+		}
+		return -1;
+	}
 	for (i = 0; i < s->n; i++) {
 		if (strcmp(s->b[i].code, code) == 0) {
 			return i;
@@ -471,6 +552,11 @@ PHP_FUNCTION(dm_soundex)
 		Z_PARAM_STR(input)
 	ZEND_PARSE_PARAMETERS_END();
 
+	if (ZSTR_LEN(input) > DMS_MAX_INPUT) {
+		zend_argument_value_error(1, "must not exceed %d bytes", DMS_MAX_INPUT);
+		RETURN_THROWS();
+	}
+
 	array_init(return_value);
 
 	/* Empty input maps to an empty list (API contract); any non-empty input
@@ -521,6 +607,15 @@ PHP_FUNCTION(dm_soundex_match)
 		Z_PARAM_STR(a)
 		Z_PARAM_STR(b)
 	ZEND_PARSE_PARAMETERS_END();
+
+	if (ZSTR_LEN(a) > DMS_MAX_INPUT) {
+		zend_argument_value_error(1, "must not exceed %d bytes", DMS_MAX_INPUT);
+		RETURN_THROWS();
+	}
+	if (ZSTR_LEN(b) > DMS_MAX_INPUT) {
+		zend_argument_value_error(2, "must not exceed %d bytes", DMS_MAX_INPUT);
+		RETURN_THROWS();
+	}
 
 	dms_codes(a, &sa);
 	dms_codes(b, &sb);

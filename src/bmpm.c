@@ -782,6 +782,7 @@ static void run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *
 				const bmpm_rule *rule = &rs->rules[r];
 				const uint32_t *pat = ix->decoded[r].pat;
 				int plen = ix->decoded[r].plen;
+				if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
 				if (i + plen > n) continue;
 				if (!seqeq(cp + i, plen, pat, plen)) continue;
 				if (!ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;

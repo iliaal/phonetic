@@ -271,11 +271,16 @@ static int mra_iequals(const char *a, size_t al, const char *b, size_t bl)
  * mirrored positions; return 6 minus the longer remaining length. */
 static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 {
-	char *ca = estrndup(a, na);
-	char *cb = estrndup(b, nb);
+	/* Both inputs have already passed getFirst3Last3, so na, nb <= 6; a stack
+	 * scratch buffer avoids two heap alloc/free pairs per comparison. */
+	char ca[8], cb[8];
 	int n1 = (int) na - 1;
 	int n2 = (int) nb - 1;
 	int i, la = 0, lb = 0, longer, r;
+
+	ZEND_ASSERT(na <= sizeof(ca) && nb <= sizeof(cb));
+	memcpy(ca, a, na);
+	memcpy(cb, b, nb);
 
 	for (i = 0; i < (int) na; i++) {
 		if (i > n2) {
@@ -294,9 +299,6 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 	for (i = 0; i < (int) na; i++) if (ca[i] != ' ') la++;
 	for (i = 0; i < (int) nb; i++) if (cb[i] != ' ') lb++;
 	longer = la > lb ? la : lb;
-
-	efree(ca);
-	efree(cb);
 
 	r = 6 - longer;
 	return r < 0 ? -r : r;

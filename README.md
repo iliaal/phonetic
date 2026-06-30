@@ -180,6 +180,10 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   practice, because it joins every word and runs three rule passes over the
   result). A single name is short, but a multi-kilobyte string can take seconds,
   so cap untrusted input length before you encode it.
+- `dm_soundex()` and `dm_soundex_match()` reject input longer than 4096 bytes
+  with a `ValueError`. Real names are far shorter; the cap bounds the
+  per-character branch work so an untrusted multi-megabyte string can't turn the
+  encoder into a CPU sink.
 
 ## Install
 

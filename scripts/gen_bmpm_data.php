@@ -159,8 +159,14 @@ function parse_rule_file(string $name, string $bm_dir, array $stack = []): array
         if (count($parts) !== 4) {
             fail("malformed rule (" . count($parts) . " parts) '$line' in $path");
         }
+        $pattern = strip_quotes($parts[0]);
+        if ($pattern === '') {
+            // An empty pattern compiles to a zero-length rule, which would match
+            // with zero advance and hang the matcher; forbid it at the source.
+            fail("empty rule pattern '$line' in $path");
+        }
         $rules[] = [
-            strip_quotes($parts[0]),
+            $pattern,
             strip_quotes($parts[1]),
             strip_quotes($parts[2]),
             strip_quotes($parts[3]),
