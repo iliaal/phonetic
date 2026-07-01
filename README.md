@@ -83,8 +83,8 @@ Single phonetic key (New York State Identification and Intelligence System), tun
 ```php
 nysiis(string $string, int $max_length = 6): string
 
-nysiis("Robert");                          // "RABAD"
-nysiis("Rupert");                          // "RABAD"  (same key)
+nysiis("Larson");                          // "LARSAN"
+nysiis("Larsen");                          // "LARSAN"  (same key)
 nysiis("Macdonald", 0);                    // "MCDANALD"  (full, untruncated)
 ```
 
