@@ -24,5 +24,5 @@ var_dump(dm_soundex_match("Moskowitz", "Moskovitz"));
 --EXPECT--
 bool(true)
 dm_soundex(): Argument #1 ($string) must not exceed 4096 bytes
-dm_soundex_match(): Argument #2 ($string2) must not exceed 4096 bytes
+dm_soundex_match(): Argument #2 ($b) must not exceed 4096 bytes
 bool(true)

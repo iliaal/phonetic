@@ -6,6 +6,7 @@
 // generated src/bmpm_data.h, so there is no external library dependency.
 
 ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff) support", "no");
+ARG_ENABLE("phonetic-dev", "phonetic: treat compiler warnings as errors (/WX)", "no");
 
 if (PHP_PHONETIC != "no") {
 	EXTENSION("phonetic", "phonetic.c");
@@ -15,5 +16,9 @@ if (PHP_PHONETIC != "no") {
 	// lives in src/ next to the engines that include it.
 	ADD_FLAG("CFLAGS_PHONETIC",
 		"/I" + configure_module_dirname + " /I" + configure_module_dirname + "\\src");
+	if (PHP_PHONETIC_DEV != "no") {
+		// counterpart of --enable-phonetic-dev's -Werror
+		ADD_FLAG("CFLAGS_PHONETIC", "/WX");
+	}
 	AC_DEFINE("HAVE_PHONETIC", 1, "Have phonetic support");
 }

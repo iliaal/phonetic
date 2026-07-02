@@ -22,6 +22,7 @@
 #include "php.h"
 #include "php_phonetic.h"
 #include "zend_smart_str.h"
+#include "phonetic_utf8.h"
 #include "bmpm_data.h"
 
 #include <string.h>
@@ -35,62 +36,8 @@
 #define DMS_MAX_INPUT 4096
 
 /* ---------------------------------------------------------------------- */
-/* UTF-8 helpers                                                          */
+/* UTF-8 helpers (decode/encode/lowercase live in phonetic_utf8.h)        */
 /* ---------------------------------------------------------------------- */
-
-/* Decode the first code point of s (length len). Stores its byte length in
- * *clen. Malformed/truncated sequences decode as a single raw byte. */
-static uint32_t dms_u8_decode(const char *s, size_t len, int *clen)
-{
-	const unsigned char *p = (const unsigned char *) s;
-	unsigned char c = p[0];
-
-	if (c < 0x80) {
-		*clen = 1;
-		return c;
-	}
-	if ((c >> 5) == 0x6 && len >= 2 && (p[1] & 0xc0) == 0x80) {
-		*clen = 2;
-		return ((c & 0x1fu) << 6) | (p[1] & 0x3fu);
-	}
-	if ((c >> 4) == 0xe && len >= 3 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
-		*clen = 3;
-		return ((c & 0x0fu) << 12) | ((p[1] & 0x3fu) << 6) | (p[2] & 0x3fu);
-	}
-	if ((c >> 3) == 0x1e && len >= 4 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 &&
-	    (p[3] & 0xc0) == 0x80) {
-		*clen = 4;
-		return ((c & 0x07u) << 18) | ((p[1] & 0x3fu) << 12) | ((p[2] & 0x3fu) << 6) | (p[3] & 0x3fu);
-	}
-
-	*clen = 1;
-	return c;
-}
-
-/* Encode a code point to UTF-8 in buf (>= 4 bytes); returns the byte length. */
-static int dms_u8_encode(uint32_t cp, char *buf)
-{
-	if (cp < 0x80) {
-		buf[0] = (char) cp;
-		return 1;
-	}
-	if (cp < 0x800) {
-		buf[0] = (char) (0xc0 | (cp >> 6));
-		buf[1] = (char) (0x80 | (cp & 0x3f));
-		return 2;
-	}
-	if (cp < 0x10000) {
-		buf[0] = (char) (0xe0 | (cp >> 12));
-		buf[1] = (char) (0x80 | ((cp >> 6) & 0x3f));
-		buf[2] = (char) (0x80 | (cp & 0x3f));
-		return 3;
-	}
-	buf[0] = (char) (0xf0 | (cp >> 18));
-	buf[1] = (char) (0x80 | ((cp >> 12) & 0x3f));
-	buf[2] = (char) (0x80 | ((cp >> 6) & 0x3f));
-	buf[3] = (char) (0x80 | (cp & 0x3f));
-	return 4;
-}
 
 /* Number of code points in a UTF-8 byte run. */
 static int dms_u8_cplen(const char *s, size_t len)
@@ -103,22 +50,6 @@ static int dms_u8_cplen(const char *s, size_t len)
 		}
 	}
 	return n;
-}
-
-/* Lower-case a single code point, mirroring Java's Character.toLowerCase for
- * the Latin ranges the rule data and realistic names use. */
-static uint32_t dms_lc_cp(uint32_t c)
-{
-	if (c >= 'A' && c <= 'Z') return c + 32;
-	if (c >= 0xC0 && c <= 0xD6) return c + 0x20;   /* A-grave .. O-diaeresis */
-	if (c >= 0xD8 && c <= 0xDE) return c + 0x20;   /* O-slash .. Thorn */
-	if (c >= 0x0100 && c <= 0x0137) return (c & 1u) ? c : c + 1;
-	if (c >= 0x0139 && c <= 0x0148) return (c & 1u) ? c + 1 : c;
-	if (c >= 0x014A && c <= 0x0177) return (c & 1u) ? c : c + 1;
-	if (c == 0x0178) return 0x00FF;                 /* Y-diaeresis */
-	if (c >= 0x0179 && c <= 0x017E) return (c & 1u) ? c + 1 : c;
-	if (c == 0x021A) return 0x021B;                 /* T-comma (Romanian) */
-	return c;
 }
 
 /* Java Character.isWhitespace: ASCII control whitespace plus the Unicode space
@@ -276,6 +207,16 @@ static void dms_set_push_dedup(dms_set *s, const dms_branch *br)
 	}
 }
 
+/* Empty the set for reuse, keeping the branch and hash allocations so the
+ * per-character generation swap in dms_encode doesn't allocate. */
+static void dms_set_reset(dms_set *s)
+{
+	s->n = 0;
+	if (s->hash) {
+		memset(s->hash, 0, ((size_t) s->hmask + 1) * sizeof(int));
+	}
+}
+
 /* Commons Codec Branch.processNextReplacement. A replacement is skipped when
  * the previous replacement already ends with it, unless forced (mn/nm). */
 static void dms_process(dms_branch *br, const char *rep, int force)
@@ -377,14 +318,15 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 
 	while (i < len) {
 		int cl;
-		uint32_t cp = dms_u8_decode(s + i, len - i, &cl);
+		uint32_t cp = ph_u8_next(s + i, len - i, &cl);
 		i += cl;
 
 		if (dms_is_ws(cp)) {
 			continue;
 		}
 
-		cp = dms_lc_cp(cp);
+		/* Character.toLowerCase over the Latin ranges the rule data uses */
+		cp = ph_lc_latin(cp);
 
 		if (cp < 0x80) {
 			smart_str_appendc(out, (char) cp);
@@ -393,12 +335,12 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 
 		{
 			char tmp[4];
-			int tl = dms_u8_encode(cp, tmp);
+			int tl = ph_u8_encode_cp(cp, tmp);
 			int folded = 0;
 			size_t f;
 			for (f = 0; f < dm_foldings_count; f++) {
-				const char *from = dm_foldings[f].from;
-				if ((int) strlen(from) == tl && memcmp(from, tmp, (size_t) tl) == 0) {
+				if (dm_foldings[f].from_len == tl
+						&& memcmp(dm_foldings[f].from, tmp, (size_t) tl) == 0) {
 					smart_str_appends(out, dm_foldings[f].to);
 					folded = 1;
 					break;
@@ -417,23 +359,29 @@ static int dms_is_vowel(char c)
 }
 
 /* Run the DM soundex over the cleaned buffer, collecting distinct 6-digit
- * codes into `out` in branch insertion order. */
-static void dms_encode(const char *buf, size_t buflen, dms_set *out)
+ * codes into `out` in branch insertion order. Returns 1 when at least one
+ * rule matched (the input actually coded), 0 when nothing did — the padded
+ * all-zero code from unencodable input is oracle parity for dm_soundex()
+ * itself, but must not make dm_soundex_match() call two such inputs
+ * homophones. */
+static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 {
-	dms_set cur;
+	dms_set setA, setB;
+	dms_set *cur = &setA, *next = &setB;
 	dms_branch init;
 	uint32_t last_char = 0;
 	size_t index = 0;
-	int i;
+	int i, coded = 0;
 
-	dms_set_init(&cur);
+	dms_set_init(&setA);
+	dms_set_init(&setB);
 	memset(&init, 0, sizeof init);
 	init.last_null = 1;
-	dms_set_push(&cur, &init);
+	dms_set_push(cur, &init);
 
 	while (index < buflen) {
 		int cplen;
-		uint32_t cp = dms_u8_decode(buf + index, buflen - index, &cplen);
+		uint32_t cp = ph_u8_next(buf + index, buflen - index, &cplen);
 		const dm_rule *best = NULL;
 		int best_bytes = 0;
 		int best_cplen = 0;
@@ -442,7 +390,6 @@ static void dms_encode(const char *buf, size_t buflen, dms_set *out)
 		char alts[8][4];
 		int nalts;
 		int force;
-		dms_set next;
 
 		/* Longest pattern matching at this position. Only rules whose pattern
 		 * starts with the current byte can match, so scan that bucket alone and
@@ -471,6 +418,7 @@ static void dms_encode(const char *buf, size_t buflen, dms_set *out)
 			index += cplen;
 			continue;
 		}
+		coded = 1;
 
 		at_start = (last_char == 0);
 		if (at_start) {
@@ -506,24 +454,29 @@ static void dms_encode(const char *buf, size_t buflen, dms_set *out)
 
 		force = (last_char == 'm' && cp == 'n') || (last_char == 'n' && cp == 'm');
 
-		dms_set_init(&next);
-		for (i = 0; i < cur.n; i++) {
+		/* ping-pong between two sets: reset keeps the previous generation's
+		 * allocations, so a length-L input costs O(1) set allocations, not O(L) */
+		dms_set_reset(next);
+		for (i = 0; i < cur->n; i++) {
 			int ai;
 			for (ai = 0; ai < nalts; ai++) {
-				dms_branch nb = cur.b[i];
+				dms_branch nb = cur->b[i];
 				dms_process(&nb, alts[ai], force);
-				dms_set_push_dedup(&next, &nb);
+				dms_set_push_dedup(next, &nb);
 			}
 		}
-		dms_set_free(&cur);
-		cur = next;
+		{
+			dms_set *tmp = cur;
+			cur = next;
+			next = tmp;
+		}
 
 		last_char = cp;
 		index += (size_t) best_bytes;
 	}
 
-	for (i = 0; i < cur.n; i++) {
-		dms_branch *br = &cur.b[i];
+	for (i = 0; i < cur->n; i++) {
+		dms_branch *br = &cur->b[i];
 		while (br->len < DMS_MAX) {
 			br->code[br->len++] = '0';
 		}
@@ -532,7 +485,9 @@ static void dms_encode(const char *buf, size_t buflen, dms_set *out)
 			dms_set_push(out, br);
 		}
 	}
-	dms_set_free(&cur);
+	dms_set_free(&setA);
+	dms_set_free(&setB);
+	return coded;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -557,11 +512,10 @@ PHP_FUNCTION(dm_soundex)
 		RETURN_THROWS();
 	}
 
-	array_init(return_value);
-
 	/* Empty input maps to an empty list (API contract); any non-empty input
 	 * runs the engine, matching the oracle even when nothing codes. */
 	if (ZSTR_LEN(input) == 0) {
+		array_init(return_value);
 		return;
 	}
 
@@ -572,6 +526,7 @@ PHP_FUNCTION(dm_soundex)
 
 	dms_set_init(&out);
 	dms_encode(buf, buflen, &out);
+	array_init_size(return_value, (uint32_t) out.n);
 	for (i = 0; i < out.n; i++) {
 		add_next_index_stringl(return_value, out.b[i].code, DMS_MAX);
 	}
@@ -580,20 +535,23 @@ PHP_FUNCTION(dm_soundex)
 	smart_str_free(&cleaned);
 }
 
-/* Encode `input` into its Daitch-Mokotoff code set. */
-static void dms_codes(zend_string *input, dms_set *out)
+/* Encode `input` into its Daitch-Mokotoff code set. Returns 1 when the input
+ * actually coded (at least one rule matched), 0 otherwise. */
+static int dms_codes(zend_string *input, dms_set *out)
 {
 	smart_str cleaned = {0};
+	int coded;
 
 	dms_set_init(out);
 	if (ZSTR_LEN(input) == 0) {
-		return;
+		return 0;
 	}
 	dms_cleanup(ZSTR_VAL(input), ZSTR_LEN(input), &cleaned);
 	smart_str_0(&cleaned);
-	dms_encode(cleaned.s ? ZSTR_VAL(cleaned.s) : "",
-	           cleaned.s ? ZSTR_LEN(cleaned.s) : 0, out);
+	coded = dms_encode(cleaned.s ? ZSTR_VAL(cleaned.s) : "",
+	                   cleaned.s ? ZSTR_LEN(cleaned.s) : 0, out);
 	smart_str_free(&cleaned);
+	return coded;
 }
 
 PHP_FUNCTION(dm_soundex_match)
@@ -617,13 +575,21 @@ PHP_FUNCTION(dm_soundex_match)
 		RETURN_THROWS();
 	}
 
-	dms_codes(a, &sa);
-	dms_codes(b, &sb);
+	/* An input that never matched a rule still yields the padded "000000"
+	 * sentinel from the encoder (oracle parity for dm_soundex()); requiring
+	 * both sides to have actually coded keeps two unencodable inputs from
+	 * comparing as homophones, consistent with the other *_match helpers. */
+	{
+		int ca = dms_codes(a, &sa);
+		int cb = dms_codes(b, &sb);
 
-	for (i = 0; i < sa.n; i++) {
-		if (dms_set_find(&sb, sa.b[i].code) >= 0) {
-			matched = 1;
-			break;
+		if (ca && cb) {
+			for (i = 0; i < sa.n; i++) {
+				if (dms_set_find(&sb, sa.b[i].code) >= 0) {
+					matched = 1;
+					break;
+				}
+			}
 		}
 	}
 

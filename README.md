@@ -65,6 +65,8 @@ bmpm("Garcia", BMPM_SEPHARDIC, BMPM_EXACT);// "garsia|gartSa"
 
 Empty `$language` auto-detects; pass a language name (e.g. `"russian"`) to force it. Constants: `BMPM_GENERIC`, `BMPM_ASHKENAZI`, `BMPM_SEPHARDIC`, `BMPM_APPROX`, `BMPM_EXACT`.
 
+A forced language also applies to the split variants of prefixed names (`van Smith`, `d'Angelo`). Commons Codec re-detects the language inside its prefix branch, silently ignoring the forced set there; this extension deliberately diverges and keeps it forced.
+
 ### Daitch-Mokotoff Soundex
 
 List of distinct 6-digit codes (the algorithm branches on ambiguous letters). Matches Apache Commons Codec's `DaitchMokotoffSoundex` in branching mode.
@@ -109,6 +111,8 @@ Each encoder produces a different output shape, so "do these sound alike?" needs
 
 ```php
 // Double Metaphone: 2 = primary keys agree, 1 = an alternate crosses, 0 = no match
+// (a word-final J emits a trailing space into the alternate code, per the
+// published algorithm — compare codes as returned, don't trim them)
 double_metaphone_match(string $a, string $b, int $max_length = 4): int
 double_metaphone_match("Catherine", "Kathryn");          // 2
 double_metaphone_match("Vagner", "Wagner");              // 1
@@ -224,9 +228,10 @@ BSD 3-Clause (see [LICENSE](LICENSE)).
 The Beider-Morse and Daitch-Mokotoff rule data is vendored from
 [Apache Commons Codec](https://commons.apache.org/proper/commons-codec/) under
 the Apache License 2.0; its notice is included in Section 2 of the LICENSE file.
-Double Metaphone, NYSIIS, and Match Rating Approach are clean-room
-implementations of their published algorithms, with Commons Codec used only as
-the parity-test oracle (no third-party data).
+Double Metaphone, NYSIIS, and Match Rating Approach are independent
+implementations of their published algorithms, validated against (and
+edge-case-aligned with) Apache Commons Codec as the parity-test oracle
+(no third-party code or data).
 
 ---
 

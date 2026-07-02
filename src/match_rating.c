@@ -26,6 +26,7 @@
 
 #include "php.h"
 #include "php_phonetic.h"
+#include "phonetic_utf8.h"
 
 static zend_always_inline int mra_is_vowel(char c)
 {
@@ -85,32 +86,6 @@ static int mra_is_space(unsigned char c)
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-/* Decode one UTF-8 code point; *clen gets its byte length. Malformed bytes
- * decode as a single raw byte. */
-static uint32_t mra_u8(const char *s, size_t len, int *clen)
-{
-	const unsigned char *p = (const unsigned char *) s;
-	unsigned char c = p[0];
-
-	if (c < 0x80) { *clen = 1; return c; }
-	if ((c & 0xE0) == 0xC0 && len >= 2 && (p[1] & 0xC0) == 0x80) {
-		*clen = 2;
-		return ((uint32_t) (c & 0x1F) << 6) | (p[1] & 0x3F);
-	}
-	if ((c & 0xF0) == 0xE0 && len >= 3 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
-		*clen = 3;
-		return ((uint32_t) (c & 0x0F) << 12) | ((uint32_t) (p[1] & 0x3F) << 6) | (p[2] & 0x3F);
-	}
-	if ((c & 0xF8) == 0xF0 && len >= 4 && (p[1] & 0xC0) == 0x80
-			&& (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
-		*clen = 4;
-		return ((uint32_t) (c & 0x07) << 18) | ((uint32_t) (p[1] & 0x3F) << 12)
-			| ((uint32_t) (p[2] & 0x3F) << 6) | (p[3] & 0x3F);
-	}
-	*clen = 1;
-	return c;
-}
-
 /* True when the string holds at most one code point (empty or a single
  * character). The reference's trivial-input guard is `name.length() == 1`,
  * i.e. character count, not byte count — so a single multi-byte letter must
@@ -121,7 +96,7 @@ static int mra_trivial(const char *s, size_t len)
 
 	while (i < len) {
 		int clen;
-		(void) mra_u8(s + i, len - i, &clen);
+		(void) ph_u8_next(s + i, len - i, &clen);
 		i += (size_t) clen;
 		if (++cps > 1) {
 			return 0;
@@ -139,7 +114,7 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 
 	while (i < len) {
 		int clen;
-		uint32_t cp = mra_u8(src + i, len - i, &clen);
+		uint32_t cp = ph_u8_next(src + i, len - i, &clen);
 		i += (size_t) clen;
 
 		if (cp < 0x80) {

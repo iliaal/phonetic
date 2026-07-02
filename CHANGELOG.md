@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `double_metaphone()`: four rules now follow the published Philips algorithm
+  instead of a port's known deviations — silent B in `-UMB`/`-UMBER`
+  (`thumb` → `0M|TM`), GH at word positions 1-2 falls through to Parker's rule
+  (`high`/`hugh` → `H`), bare `jose` takes the Spanish-H primary (`HS|HS`), and
+  germanic CH covers word-final position (`mooch` → `MK`).
+- `double_metaphone()`: malformed UTF-8 no longer swallows the letters after a
+  stray lead byte; invalid sequences fold byte-wise (Latin-1 fallback), like
+  the other encoders.
+- `bmpm_match()`: token intersection now understands the `(remainder)-(combined)`
+  group syntax the prefix branch emits, so `bmpm_match("van Smith", "Smith")`
+  is true.
+- `bmpm()` / `bmpm_match()`: a forced `$language` is honoured inside the
+  prefix/`d'` split instead of being silently re-detected (deliberate
+  divergence from Commons Codec, which re-guesses there).
+- `bmpm()`: leading/trailing control characters are trimmed like the
+  reference's `String.trim()` (every code point `<= U+0020`).
+- `dm_soundex_match()`: two inputs that never matched any rule (e.g. two
+  all-Cyrillic or all-digit strings) no longer compare as homophones via the
+  padded `"000000"` sentinel.
+- U+0130 (`İ`) now lower-cases to `i` in `bmpm()` and `dm_soundex()` instead of
+  vanishing via a wrong İ→ı case pairing, so `İstanbul` matches `istanbul`.
+
+### Changed
+
+- The five comparison helpers' parameters are named `$a`/`$b` (as the README
+  always documented) — affects named-argument calls only.
+- Performance: bmpm decodes input once per call (was twice), pre-parses rule
+  phoneme expressions at module init, and avoids UTF-8 round-trips in the
+  prefix recursion; Double Metaphone literal matching no longer calls
+  `strlen`/`memcmp` through an out-of-line helper; Daitch-Mokotoff reuses its
+  branch-set buffers across positions.
+
 ## [0.2.0] - 2026-06-30
 
 ### Added

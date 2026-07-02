@@ -26,10 +26,4 @@ void bmpm_mshutdown(void);
 void dms_minit(void);
 void dms_mshutdown(void);
 
-#ifdef PHP_WIN32
-#define PHP_PHONETIC_API __declspec(dllexport)
-#else
-#define PHP_PHONETIC_API
-#endif
-
 #endif /* PHP_PHONETIC_H */

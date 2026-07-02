@@ -27,37 +27,38 @@
 #include "php.h"
 #include "zend_smart_str.h"
 #include "php_phonetic.h"
+#include "phonetic_utf8.h"
 
 /* Padding so lookbehind/lookahead can run past both ends without bounds tests;
  * the sentinel '-' never matches a real cluster because no code or target
  * literal contains it. PREPAD covers the deepest lookbehind (position-4),
  * POSTPAD the deepest lookahead (a 6-char window read from position+1). */
-#define DM_PREPAD  2
-#define DM_POSTPAD 8
-#define DM_SENTINEL '-'
+#define DMET_PREPAD  2
+#define DMET_POSTPAD 8
+#define DMET_SENTINEL '-'
 
-static zend_always_inline int dm_is_vowel(char c)
+static zend_always_inline int dmet_is_vowel(char c)
 {
 	return c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U' || c == 'Y';
 }
 
 /* Single character at an absolute buffer index; sentinel when out of range. */
-static zend_always_inline char dm_at(const char *buf, int total, int i)
+static zend_always_inline char dmet_at(const char *buf, int total, int i)
 {
 	if (i < 0 || i >= total) {
-		return DM_SENTINEL;
+		return DMET_SENTINEL;
 	}
 	return buf[i];
 }
 
-/* True when the literal `s` matches the buffer window starting at index `i`.
- * Mirrors Python slice equality: a window that runs into the sentinel padding
- * cannot equal a real literal, so short tail matches fail just as they do when
- * a slice is truncated at the end of the string. */
-static int dm_string_at(const char *buf, int total, int i, const char *s)
+/* True when the literal `s` (length `n`) matches the buffer window starting at
+ * index `i`. A window that runs past either end of the padded buffer cannot
+ * equal a real literal; the published algorithm's word-end space comparisons
+ * are handled explicitly at their call sites instead of via padding. The
+ * length is passed by the SAT macro as sizeof(literal)-1 so no strlen runs at
+ * match time. */
+static zend_always_inline int dmet_string_at(const char *buf, int total, int i, const char *s, size_t n)
 {
-	size_t n = strlen(s);
-
 	if (i < 0 || (size_t)i + n > (size_t)total) {
 		return 0;
 	}
@@ -68,7 +69,7 @@ static int dm_string_at(const char *buf, int total, int i, const char *s)
  * C-cedilla maps to S rather than C: in the canonical algorithm the cedilla
  * carries the /s/ sound (façade), not a hard /k/. Combining marks and code
  * points outside Latin-1 fall through to NULL and are dropped. */
-static const char *dm_fold_cp(unsigned cp)
+static const char *dmet_fold_cp(unsigned cp)
 {
 	switch (cp) {
 		case 0xC0: case 0xC1: case 0xC2: case 0xC3: case 0xC4: case 0xC5:
@@ -103,43 +104,37 @@ static const char *dm_fold_cp(unsigned cp)
 }
 
 /* Decode UTF-8, ASCII-fold accented Latin, upper-case; spaces are preserved
- * so multi-word input keeps its word boundaries. */
-static void dm_fold(const char *src, size_t len, smart_str *out)
+ * so multi-word input keeps its word boundaries. Malformed sequences decode
+ * as single raw bytes (ph_u8_next), so a stray lead byte folds as its Latin-1
+ * character instead of swallowing the letters after it. */
+static void dmet_fold(const char *src, size_t len, smart_str *out)
 {
 	size_t i = 0;
 
 	while (i < len) {
-		unsigned char b = (unsigned char) src[i];
+		int clen;
+		uint32_t cp = ph_u8_next(src + i, len - i, &clen);
 
-		if (b < 0x80) {
+		i += (size_t) clen;
+		if (cp < 0x80) {
 			/* ASCII-only uppercasing: libc toupper() honours LC_CTYPE, and a
 			 * userland setlocale() (e.g. tr_TR) would mis-fold the buffer the
 			 * encoder walks. The algorithm is defined over ASCII A-Z. */
-			char u = (b >= 'a' && b <= 'z') ? (char) (b - 'a' + 'A') : (char) b;
+			char u = (cp >= 'a' && cp <= 'z') ? (char) (cp - 'a' + 'A') : (char) cp;
 			smart_str_appendc(out, u);
-			i++;
-		} else if (b >= 0xC0 && b <= 0xDF && i + 1 < len
-				&& ((unsigned char) src[i + 1] & 0xC0) == 0x80) {
-			unsigned cp = ((b & 0x1F) << 6) | ((unsigned char) src[i + 1] & 0x3F);
-			const char *mapped = dm_fold_cp(cp);
+		} else {
+			const char *mapped = dmet_fold_cp((unsigned) cp);
 
 			if (mapped) {
 				smart_str_appends(out, mapped);
 			}
-			i += 2;
-		} else if (b >= 0xE0 && b <= 0xEF && i + 2 < len) {
-			i += 3;
-		} else if (b >= 0xF0 && i + 3 < len) {
-			i += 4;
-		} else {
-			i++;
 		}
 	}
 }
 
 /* Core encoder. `folded` is upper-cased ASCII; emits the full (untruncated)
  * primary and alternate codes into the supplied buffers. */
-static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_str *secondary)
+static void dmet_encode(const char *folded, size_t len, smart_str *primary, smart_str *secondary)
 {
 	int total, start, end, pos, slavo;
 	char *buf;
@@ -154,18 +149,18 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 	 * length that would overflow them must be refused before the narrowing cast
 	 * below undersizes the allocation. Unreachable under any sane memory_limit
 	 * (folding never expands, so this needs a ~2GB input). */
-	if (len > (size_t) INT_MAX - (DM_PREPAD + DM_POSTPAD + 1)) {
+	if (len > (size_t) INT_MAX - (DMET_PREPAD + DMET_POSTPAD + 1)) {
 		return;
 	}
 
-	total = DM_PREPAD + (int) len + DM_POSTPAD;
+	total = DMET_PREPAD + (int) len + DMET_POSTPAD;
 	buf = emalloc((size_t) total + 1);
-	memset(buf, DM_SENTINEL, (size_t) total);
-	memcpy(buf + DM_PREPAD, folded, len);
+	memset(buf, DMET_SENTINEL, (size_t) total);
+	memcpy(buf + DMET_PREPAD, folded, len);
 	buf[total] = '\0';
 
-	start = DM_PREPAD;
-	end = DM_PREPAD + (int) len - 1;
+	start = DMET_PREPAD;
+	end = DMET_PREPAD + (int) len - 1;
 
 	slavo = (memchr(folded, 'W', len) != NULL) || (memchr(folded, 'K', len) != NULL);
 	if (!slavo) {
@@ -178,26 +173,24 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 		}
 	}
 
-#define B(i)       dm_at(buf, total, (i))
-#define SAT(i, s)  dm_string_at(buf, total, (i), (s))
+#define B(i)       dmet_at(buf, total, (i))
+#define SAT(i, s)  dmet_string_at(buf, total, (i), "" s, sizeof(s) - 1)
 
 	/* check_word_start: skip a silent leading cluster, and map an initial X to S. */
-	pos = DM_PREPAD;
+	pos = DMET_PREPAD;
 	if (SAT(pos, "GN") || SAT(pos, "KN") || SAT(pos, "PN")
 			|| SAT(pos, "WR") || SAT(pos, "PS")) {
 		pos++;
 	}
-	if (B(DM_PREPAD) == 'X') {
+	if (B(DMET_PREPAD) == 'X') {
 		smart_str_appendc(primary, 'S');
 		smart_str_appendc(secondary, 'S');
 		pos++;
 	}
 
-	/* The (pc, sc, adv) triple persists across iterations: a handful of letter
-	 * branches (the GH gaps) deliberately leave it untouched to reuse the
-	 * previous step's action, as the reference algorithm does. Non-letter bytes
-	 * are handled by the switch default, which skips them (emit nothing,
-	 * advance one). */
+	/* Every branch assigns the (pc, sc, adv) action for the current position.
+	 * Non-letter bytes are handled by the switch default, which skips them
+	 * (emit nothing, advance one). */
 	pc = NULL;
 	sc = NULL;
 	adv = 1;
@@ -210,7 +203,7 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 			continue;
 		}
 
-		if (dm_is_vowel(c)) {
+		if (dmet_is_vowel(c)) {
 			pc = (pos == start) ? "A" : NULL;
 			sc = pc;
 			adv = 1;
@@ -222,7 +215,7 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				break;
 
 			case 'C':
-				if (pos > start + 1 && !dm_is_vowel(B(pos - 2)) && SAT(pos - 1, "ACH")
+				if (pos > start + 1 && !dmet_is_vowel(B(pos - 2)) && SAT(pos - 1, "ACH")
 						&& B(pos + 2) != 'I'
 						&& (B(pos + 2) != 'E' || SAT(pos - 2, "BACHER") || SAT(pos - 2, "MACHER"))) {
 					pc = sc = "K";
@@ -252,7 +245,9 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 									|| pos == start)
 								&& (B(pos + 2) == 'L' || B(pos + 2) == 'R' || B(pos + 2) == 'N'
 									|| B(pos + 2) == 'M' || B(pos + 2) == 'B' || B(pos + 2) == 'H'
-									|| B(pos + 2) == 'F' || B(pos + 2) == 'V' || B(pos + 2) == 'W'))) {
+									|| B(pos + 2) == 'F' || B(pos + 2) == 'V' || B(pos + 2) == 'W'
+									/* germanic CH at word end ('mooch') or before a space */
+									|| B(pos + 2) == ' ' || pos + 2 > end))) {
 						pc = sc = "K";
 						adv = 2;
 					} else {
@@ -340,22 +335,21 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 
 			case 'G':
 				if (B(pos + 1) == 'H') {
-					if (pos > start && !dm_is_vowel(B(pos - 1))) {
+					if (pos > start && !dmet_is_vowel(B(pos - 1))) {
 						pc = sc = "K";
 						adv = 2;
-					} else if (pos < start + 3) {
-						if (pos == start) {
-							if (B(pos + 2) == 'I') {
-								pc = sc = "J";
-							} else {
-								pc = sc = "K";
-							}
-							adv = 2;
+					} else if (pos == start) {
+						if (B(pos + 2) == 'I') {
+							pc = sc = "J";
+						} else {
+							pc = sc = "K";
 						}
-						/* else: keep the previous action (reference gap) */
+						adv = 2;
 					} else if ((pos > start + 1 && (B(pos - 2) == 'B' || B(pos - 2) == 'H' || B(pos - 2) == 'D'))
 							|| (pos > start + 2 && (B(pos - 3) == 'B' || B(pos - 3) == 'H' || B(pos - 3) == 'D'))
 							|| (pos > start + 3 && (B(pos - 4) == 'B' || B(pos - 4) == 'H'))) {
+						/* Parker's rule: silent GH after B/H/D within four letters
+						 * ('hugh', 'bought') */
 						pc = sc = NULL;
 						adv = 2;
 					} else {
@@ -363,15 +357,15 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 								&& (B(pos - 3) == 'C' || B(pos - 3) == 'G' || B(pos - 3) == 'L'
 									|| B(pos - 3) == 'R' || B(pos - 3) == 'T')) {
 							pc = sc = "F";
-							adv = 2;
 						} else if (pos > start && B(pos - 1) != 'I') {
 							pc = sc = "K";
-							adv = 2;
+						} else {
+							pc = sc = NULL;   /* GH after initial I ('sigh') */
 						}
-						/* else: keep the previous action (reference gap) */
+						adv = 2;
 					}
 				} else if (B(pos + 1) == 'N') {
-					if (pos == start + 1 && dm_is_vowel(B(start)) && !slavo) {
+					if (pos == start + 1 && dmet_is_vowel(B(start)) && !slavo) {
 						pc = "KN";
 						sc = "N";
 						adv = 2;
@@ -427,7 +421,7 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				break;
 
 			case 'H':
-				if ((pos == start || dm_is_vowel(B(pos - 1))) && dm_is_vowel(B(pos + 1))) {
+				if ((pos == start || dmet_is_vowel(B(pos - 1))) && dmet_is_vowel(B(pos + 1))) {
 					pc = sc = "H";
 					adv = 2;
 				} else {
@@ -438,7 +432,9 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 
 			case 'J':
 				if (SAT(pos, "JOSE") || SAT(start, "SAN ")) {
-					if ((pos == start && B(pos + 4) == ' ') || SAT(start, "SAN ")) {
+					/* pos + 4 > end: the word is exactly "JOSE" (bare, no tail) */
+					if ((pos == start && (B(pos + 4) == ' ' || pos + 4 > end))
+							|| SAT(start, "SAN ")) {
 						pc = sc = "H";
 					} else {
 						pc = "J";
@@ -447,7 +443,7 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				} else if (pos == start && !SAT(pos, "JOSE")) {
 					pc = "J";
 					sc = "A";
-				} else if (dm_is_vowel(B(pos - 1)) && !slavo
+				} else if (dmet_is_vowel(B(pos - 1)) && !slavo
 						&& (B(pos + 1) == 'A' || B(pos + 1) == 'O')) {
 					pc = "J";
 					sc = "H";
@@ -490,7 +486,8 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				break;
 
 			case 'M':
-				if ((SAT(pos + 1, "UMB") && (pos + 1 == end || SAT(pos + 2, "ER")))
+				/* silent B in -UMB / -UMBER: U before, B after ('dumb', 'thumb') */
+				if ((SAT(pos - 1, "UMB") && (pos + 1 == end || SAT(pos + 2, "ER")))
 						|| B(pos + 1) == 'M') {
 					pc = sc = "M";
 					adv = 2;
@@ -575,7 +572,7 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 							} else {
 								pc = sc = "SK";
 							}
-						} else if (pos == start && !dm_is_vowel(B(start + 3)) && B(start + 3) != 'W') {
+						} else if (pos == start && !dmet_is_vowel(B(start + 3)) && B(start + 3) != 'W') {
 							pc = "X";
 							sc = "S";
 						} else {
@@ -631,15 +628,15 @@ static void dm_encode(const char *folded, size_t len, smart_str *primary, smart_
 				if (SAT(pos, "WR")) {
 					pc = sc = "R";
 					adv = 2;
-				} else if (pos == start && (dm_is_vowel(B(pos + 1)) || SAT(pos, "WH"))) {
-					if (dm_is_vowel(B(pos + 1))) {
+				} else if (pos == start && (dmet_is_vowel(B(pos + 1)) || SAT(pos, "WH"))) {
+					if (dmet_is_vowel(B(pos + 1))) {
 						pc = "A";
 						sc = "F";
 					} else {
 						pc = sc = "A";
 					}
 					adv = 1;
-				} else if ((pos == end && dm_is_vowel(B(pos - 1)))
+				} else if ((pos == end && dmet_is_vowel(B(pos - 1)))
 						|| SAT(pos - 1, "EWSKI") || SAT(pos - 1, "EWSKY")
 						|| SAT(pos - 1, "OWSKI") || SAT(pos - 1, "OWSKY")
 						|| SAT(start, "SCH")) {
@@ -725,10 +722,10 @@ PHP_FUNCTION(double_metaphone)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	dm_fold(ZSTR_VAL(input), ZSTR_LEN(input), &folded);
+	dmet_fold(ZSTR_VAL(input), ZSTR_LEN(input), &folded);
 
 	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
-		dm_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), &primary, &secondary);
+		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), &primary, &secondary);
 	}
 
 	if (primary.s != NULL) {
@@ -762,13 +759,13 @@ PHP_FUNCTION(double_metaphone)
 }
 
 /* Fold + encode one string into its untruncated primary/alternate codes. */
-static void dm_codes(const char *in, size_t len, smart_str *primary, smart_str *secondary)
+static void dmet_codes(const char *in, size_t len, smart_str *primary, smart_str *secondary)
 {
 	smart_str folded = {0};
 
-	dm_fold(in, len, &folded);
+	dmet_fold(in, len, &folded);
 	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
-		dm_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary);
+		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary);
 	}
 	if (primary->s != NULL) {
 		smart_str_0(primary);
@@ -780,7 +777,7 @@ static void dm_codes(const char *in, size_t len, smart_str *primary, smart_str *
 }
 
 /* Two non-empty codes of equal (capped) length comparing identical. */
-static zend_always_inline int dm_code_eq(const smart_str *x, const smart_str *y, size_t cap)
+static zend_always_inline int dmet_code_eq(const smart_str *x, const smart_str *y, size_t cap)
 {
 	size_t xl = x->s ? ZSTR_LEN(x->s) : 0;
 	size_t yl = y->s ? ZSTR_LEN(y->s) : 0;
@@ -808,16 +805,16 @@ PHP_FUNCTION(double_metaphone_match)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	dm_codes(ZSTR_VAL(a), ZSTR_LEN(a), &pa, &sa);
-	dm_codes(ZSTR_VAL(b), ZSTR_LEN(b), &pb, &sb);
+	dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), &pa, &sa);
+	dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), &pb, &sb);
 
 	/* max_length <= 0 means "no limit": compare the full codes. */
 	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
 
-	if (dm_code_eq(&pa, &pb, cap)) {
+	if (dmet_code_eq(&pa, &pb, cap)) {
 		result = 2;                                       /* primaries agree */
-	} else if (dm_code_eq(&pa, &sb, cap) || dm_code_eq(&sa, &pb, cap)
-			|| dm_code_eq(&sa, &sb, cap)) {
+	} else if (dmet_code_eq(&pa, &sb, cap) || dmet_code_eq(&sa, &pb, cap)
+			|| dmet_code_eq(&sa, &sb, cap)) {
 		result = 1;                                       /* an alternate crosses */
 	}
 

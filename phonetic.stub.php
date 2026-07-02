@@ -28,16 +28,16 @@ function nysiis(string $string, int $max_length = 6): string {}
 
 function match_rating(string $string): string {}
 
-function nysiis_match(string $string1, string $string2, int $max_length = 6): bool {}
+function nysiis_match(string $a, string $b, int $max_length = 6): bool {}
 
-function match_rating_compare(string $string1, string $string2): bool {}
+function match_rating_compare(string $a, string $b): bool {}
 
 /**
  * Returns the Double Metaphone match strength of two strings:
  * 2 = primary codes agree, 1 = an alternate code crosses, 0 = no match.
  */
-function double_metaphone_match(string $string1, string $string2, int $max_length = 4): int {}
+function double_metaphone_match(string $a, string $b, int $max_length = 4): int {}
 
-function bmpm_match(string $string1, string $string2, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): bool {}
+function bmpm_match(string $a, string $b, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): bool {}
 
-function dm_soundex_match(string $string1, string $string2): bool {}
+function dm_soundex_match(string $a, string $b): bool {}

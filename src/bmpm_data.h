@@ -3,8 +3,11 @@
   | Copyright (c) 2026, Ilia Alshanetsky                                 |
   | Copyright (c) 2026, Advanced Internet Designs Inc.                   |
   +----------------------------------------------------------------------+
-  | This source file is subject to the BSD 3-Clause license that is      |
-  | bundled with this package in the file LICENSE.                       |
+  | The generator and the C scaffolding in this file are subject to the  |
+  | BSD 3-Clause license bundled with this package in the file LICENSE.  |
+  | The embedded rule tables are mechanically transformed from Apache    |
+  | Commons Codec resource files and remain under the Apache License 2.0 |
+  | (see LICENSE Section 2 and vendor/commons-codec-bm/).                |
   +----------------------------------------------------------------------+
   | Author: Ilia Alshanetsky <ilia@ilia.ws>                              |
   +----------------------------------------------------------------------+
@@ -40,8 +43,8 @@
  *                      hold "|"-separated branch alternatives, kept raw.
  *   dm_folding       : one accent/ligature folding (from -> to), raw UTF-8.
  *
- * name_type values : BMPM_GEN, BMPM_ASH, BMPM_SEP (indices into bmpm_name_types).
- * rule_type values : BMPM_RULES, BMPM_APPROX, BMPM_EXACT.
+ * name_type values : BMPM_GEN ("gen"), BMPM_ASH ("ash"), BMPM_SEP ("sep").
+ * rule_type values : BMPM_RULES ("rules"), BMPM_APPROX ("approx"), BMPM_EXACT ("exact").
  */
 
 #ifndef PHP_BMPM_DATA_H
@@ -51,9 +54,6 @@
 
 enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };
 enum bmpm_rule_type { BMPM_RULES = 0, BMPM_APPROX = 1, BMPM_EXACT = 2 };
-
-static const char *const bmpm_name_types[] = { "gen", "ash", "sep" };
-static const char *const bmpm_rule_types[] = { "rules", "approx", "exact" };
 
 typedef struct {
     const char *pattern;
@@ -97,6 +97,7 @@ typedef struct {
 
 typedef struct {
     const char *from;
+    int         from_len;   /* strlen(from), precomputed */
     const char *to;
 } dm_folding;
 
@@ -5762,43 +5763,43 @@ static const size_t dm_rules_count = 124;
 
 /* ---- Daitch-Mokotoff accent / ligature foldings ---- */
 static const dm_folding dm_foldings[] = {
-    { "\303\237", "s" },
-    { "\303\240", "a" },
-    { "\303\241", "a" },
-    { "\303\242", "a" },
-    { "\303\243", "a" },
-    { "\303\244", "a" },
-    { "\303\245", "a" },
-    { "\303\246", "a" },
-    { "\303\247", "c" },
-    { "\303\250", "e" },
-    { "\303\251", "e" },
-    { "\303\252", "e" },
-    { "\303\253", "e" },
-    { "\303\254", "i" },
-    { "\303\255", "i" },
-    { "\303\256", "i" },
-    { "\303\257", "i" },
-    { "\303\260", "d" },
-    { "\303\261", "n" },
-    { "\303\262", "o" },
-    { "\303\263", "o" },
-    { "\303\264", "o" },
-    { "\303\265", "o" },
-    { "\303\266", "o" },
-    { "\303\270", "o" },
-    { "\303\271", "u" },
-    { "\303\272", "u" },
-    { "\303\273", "u" },
-    { "\303\275", "y" },
-    { "\303\275", "y" },
-    { "\303\276", "b" },
-    { "\303\277", "y" },
-    { "\304\207", "c" },
-    { "\305\202", "l" },
-    { "\305\233", "s" },
-    { "\305\274", "z" },
-    { "\305\272", "z" },
+    { "\303\237", 2, "s" },
+    { "\303\240", 2, "a" },
+    { "\303\241", 2, "a" },
+    { "\303\242", 2, "a" },
+    { "\303\243", 2, "a" },
+    { "\303\244", 2, "a" },
+    { "\303\245", 2, "a" },
+    { "\303\246", 2, "a" },
+    { "\303\247", 2, "c" },
+    { "\303\250", 2, "e" },
+    { "\303\251", 2, "e" },
+    { "\303\252", 2, "e" },
+    { "\303\253", 2, "e" },
+    { "\303\254", 2, "i" },
+    { "\303\255", 2, "i" },
+    { "\303\256", 2, "i" },
+    { "\303\257", 2, "i" },
+    { "\303\260", 2, "d" },
+    { "\303\261", 2, "n" },
+    { "\303\262", 2, "o" },
+    { "\303\263", 2, "o" },
+    { "\303\264", 2, "o" },
+    { "\303\265", 2, "o" },
+    { "\303\266", 2, "o" },
+    { "\303\270", 2, "o" },
+    { "\303\271", 2, "u" },
+    { "\303\272", 2, "u" },
+    { "\303\273", 2, "u" },
+    { "\303\275", 2, "y" },
+    { "\303\275", 2, "y" },
+    { "\303\276", 2, "b" },
+    { "\303\277", 2, "y" },
+    { "\304\207", 2, "c" },
+    { "\305\202", 2, "l" },
+    { "\305\233", 2, "s" },
+    { "\305\274", 2, "z" },
+    { "\305\272", 2, "z" },
 };
 static const size_t dm_foldings_count = 37;
 

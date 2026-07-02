@@ -30,7 +30,7 @@ Yablonsky      APLN | APLN
 Wasserman      ASRM | FSRM
 Vasserman      FSRM | FSRM
 Michael        MKL | MXL
-Thumb          0MP | TMP
+Thumb          0M | TM
 Xavier         SF | SFR
 Joqqi          JK | AK
 Czerny         SRN | XRN

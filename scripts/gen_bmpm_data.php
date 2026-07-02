@@ -49,6 +49,59 @@ function fail(string $msg): void
     exit(1);
 }
 
+/* Code-point count of a UTF-8 byte string (non-continuation bytes). */
+function cp_count(string $s): int
+{
+    $n = 0;
+    $len = strlen($s);
+    for ($i = 0; $i < $len; $i++) {
+        if ((ord($s[$i]) & 0xC0) !== 0x80) {
+            $n++;
+        }
+    }
+    return $n;
+}
+
+/*
+ * The C engines size several buffers to fixed caps and would TRUNCATE
+ * SILENTLY (mis-encoding, not crashing) if the vendored data ever outgrew
+ * them. Regeneration is the gate: fail loudly here instead. Each limit names
+ * the buffer it protects.
+ */
+const CAP_BM_PATTERN_CPS  = 64;   /* build_ruleset_index: uint32_t b[64] */
+const CAP_BM_CONTEXT_CPS  = 64;   /* build_ctx_R rb[128] incl. anchor; regex_atom_match atoms[64] */
+const CAP_BM_PHONEME_ALTS = 63;   /* parse_phoneme_expr: alts[64]/segs[64] incl. silent alt */
+const CAP_BM_LANG_BRACKET = 63;   /* parse_phoneme_expr: lb[64] NUL-terminated */
+const CAP_BM_GUESS_CPS    = 128;  /* build_lang_index: buf[512], atom_t tmp[128]; atoms <= cps */
+const CAP_BM_LANGUAGES    = 31;   /* langset_t bitmask; 1u << count is UB at 32 (LS_ANY sentinel) */
+const CAP_DM_CODE_ALTS    = 8;    /* dms_encode: alts[8][4] */
+const CAP_DM_CODE_LEN     = 3;    /* dms_encode: alts[.][4] NUL-terminated */
+const CAP_DM_FOLD_FROM    = 4;    /* dms_cleanup: char tmp[4] comparison window */
+
+function check_bm_rule(array $r, string $where): void
+{
+    [$pattern, $lcon, $rcon, $phoneme] = $r;
+    if (cp_count($pattern) > CAP_BM_PATTERN_CPS) {
+        fail("rule pattern exceeds " . CAP_BM_PATTERN_CPS . " code points in $where: $pattern");
+    }
+    foreach ([$lcon, $rcon] as $ctx) {
+        if (cp_count($ctx) > CAP_BM_CONTEXT_CPS) {
+            fail("rule context exceeds " . CAP_BM_CONTEXT_CPS . " code points in $where: $ctx");
+        }
+    }
+    /* alternatives: '|' splits plus the possible explicit silent alternative */
+    if (substr_count($phoneme, '|') + 2 > CAP_BM_PHONEME_ALTS) {
+        fail("phoneme expression exceeds " . CAP_BM_PHONEME_ALTS . " alternatives in $where: $phoneme");
+    }
+    if (preg_match_all('/\[([^\]]*)\]/', $phoneme, $m)) {
+        foreach ($m[1] as $langlist) {
+            if (strlen($langlist) > CAP_BM_LANG_BRACKET) {
+                fail("phoneme language list exceeds " . CAP_BM_LANG_BRACKET . " bytes in $where: [$langlist]");
+            }
+        }
+    }
+}
+
 /* Strip at most one leading and one trailing double quote (matches the
  * reference stripQuotes(): it does NOT unescape, so a literal-quote pattern
  * such as "\"" is retained verbatim as the two bytes \ and "). */
@@ -165,12 +218,14 @@ function parse_rule_file(string $name, string $bm_dir, array $stack = []): array
             // with zero advance and hang the matcher; forbid it at the source.
             fail("empty rule pattern '$line' in $path");
         }
-        $rules[] = [
+        $rule = [
             $pattern,
             strip_quotes($parts[1]),
             strip_quotes($parts[2]),
             strip_quotes($parts[3]),
         ];
+        check_bm_rule($rule, $path);
+        $rules[] = $rule;
     }
     return $rules;
 }
@@ -188,6 +243,9 @@ foreach (NAME_TYPES as $nt) {
     $files_parsed++;
     if (!$languages[$nt]) {
         fail("no languages parsed for $nt");
+    }
+    if (count($languages[$nt]) > CAP_BM_LANGUAGES) {
+        fail("more than " . CAP_BM_LANGUAGES . " languages for $nt; the langset_t bitmask cannot hold them");
     }
 }
 
@@ -221,6 +279,9 @@ foreach (NAME_TYPES as $nt) {
         if (count($parts) < 3) {
             fail("malformed lang rule '$line' in {$nt}_lang.txt");
         }
+        if (cp_count($parts[0]) > CAP_BM_GUESS_CPS) {
+            fail("lang-guess pattern exceeds " . CAP_BM_GUESS_CPS . " code points in {$nt}_lang.txt: $parts[0]");
+        }
         $rows[] = [$parts[0], $parts[1], $parts[2] === 'true'];
     }
     $lang_rules[$nt] = $rows;
@@ -236,18 +297,36 @@ foreach (logical_lines($dm_file) as $line) {
         if (count($parts) !== 2) {
             fail("malformed folding '$line' in dmrules.txt");
         }
+        if ($parts[0] === '' || strlen($parts[0]) > CAP_DM_FOLD_FROM) {
+            fail("folding source must be 1-" . CAP_DM_FOLD_FROM . " bytes in dmrules.txt: '$line'");
+        }
         $dm_foldings[] = [$parts[0], $parts[1]];
     } else {
         $parts = preg_split('/\s+/', $line);
         if (count($parts) !== 4) {
             fail("malformed DM rule '$line' in dmrules.txt");
         }
-        $dm_rules[] = [
+        $rule = [
             strip_quotes($parts[0]),
             strip_quotes($parts[1]),
             strip_quotes($parts[2]),
             strip_quotes($parts[3]),
         ];
+        if ($rule[0] === '') {
+            fail("empty DM rule pattern '$line' in dmrules.txt");
+        }
+        foreach ([1, 2, 3] as $ci) {
+            $alts = explode('|', $rule[$ci]);
+            if (count($alts) > CAP_DM_CODE_ALTS) {
+                fail("DM code column exceeds " . CAP_DM_CODE_ALTS . " alternatives in dmrules.txt: '$line'");
+            }
+            foreach ($alts as $alt) {
+                if (strlen($alt) > CAP_DM_CODE_LEN) {
+                    fail("DM code alternative exceeds " . CAP_DM_CODE_LEN . " chars in dmrules.txt: '$line'");
+                }
+            }
+        }
+        $dm_rules[] = $rule;
     }
 }
 $files_parsed++;
@@ -267,8 +346,11 @@ $b[] = '  +---------------------------------------------------------------------
 $b[] = '  | Copyright (c) 2026, Ilia Alshanetsky                                 |';
 $b[] = '  | Copyright (c) 2026, Advanced Internet Designs Inc.                   |';
 $b[] = '  +----------------------------------------------------------------------+';
-$b[] = '  | This source file is subject to the BSD 3-Clause license that is      |';
-$b[] = '  | bundled with this package in the file LICENSE.                       |';
+$b[] = '  | The generator and the C scaffolding in this file are subject to the  |';
+$b[] = '  | BSD 3-Clause license bundled with this package in the file LICENSE.  |';
+$b[] = '  | The embedded rule tables are mechanically transformed from Apache    |';
+$b[] = '  | Commons Codec resource files and remain under the Apache License 2.0 |';
+$b[] = '  | (see LICENSE Section 2 and vendor/commons-codec-bm/).                |';
 $b[] = '  +----------------------------------------------------------------------+';
 $b[] = '  | Author: Ilia Alshanetsky <ilia@ilia.ws>                              |';
 $b[] = '  +----------------------------------------------------------------------+';
@@ -304,8 +386,8 @@ $b[] = ' *                      (at_start / before_vowel / default). A code colu
 $b[] = ' *                      hold "|"-separated branch alternatives, kept raw.';
 $b[] = ' *   dm_folding       : one accent/ligature folding (from -> to), raw UTF-8.';
 $b[] = ' *';
-$b[] = ' * name_type values : BMPM_GEN, BMPM_ASH, BMPM_SEP (indices into bmpm_name_types).';
-$b[] = ' * rule_type values : BMPM_RULES, BMPM_APPROX, BMPM_EXACT.';
+$b[] = ' * name_type values : BMPM_GEN ("gen"), BMPM_ASH ("ash"), BMPM_SEP ("sep").';
+$b[] = ' * rule_type values : BMPM_RULES ("rules"), BMPM_APPROX ("approx"), BMPM_EXACT ("exact").';
 $b[] = ' */';
 $b[] = '';
 $b[] = '#ifndef PHP_BMPM_DATA_H';
@@ -315,9 +397,6 @@ $b[] = '#include <stddef.h>';
 $b[] = '';
 $b[] = 'enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };';
 $b[] = 'enum bmpm_rule_type { BMPM_RULES = 0, BMPM_APPROX = 1, BMPM_EXACT = 2 };';
-$b[] = '';
-$b[] = 'static const char *const bmpm_name_types[] = { "gen", "ash", "sep" };';
-$b[] = 'static const char *const bmpm_rule_types[] = { "rules", "approx", "exact" };';
 $b[] = '';
 $b[] = 'typedef struct {';
 $b[] = '    const char *pattern;';
@@ -361,6 +440,7 @@ $b[] = '} dm_rule;';
 $b[] = '';
 $b[] = 'typedef struct {';
 $b[] = '    const char *from;';
+$b[] = '    int         from_len;   /* strlen(from), precomputed */';
 $b[] = '    const char *to;';
 $b[] = '} dm_folding;';
 $b[] = '';
@@ -461,7 +541,7 @@ $b[] = '';
 $b[] = '/* ---- Daitch-Mokotoff accent / ligature foldings ---- */';
 $b[] = 'static const dm_folding dm_foldings[] = {';
 foreach ($dm_foldings as $f) {
-    $b[] = sprintf('    { %s, %s },', c_str($f[0]), c_str($f[1]));
+    $b[] = sprintf('    { %s, %d, %s },', c_str($f[0]), strlen($f[0]), c_str($f[1]));
 }
 $b[] = '};';
 $b[] = 'static const size_t dm_foldings_count = ' . count($dm_foldings) . ';';
