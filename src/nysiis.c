@@ -23,7 +23,6 @@
 #include <string.h>
 
 #include "php.h"
-#include "zend_smart_str.h"
 #include "php_phonetic.h"
 
 static zend_always_inline int ny_is_vowel(char c)
@@ -95,17 +94,18 @@ static int ny_transcode(char prev, char curr, char next, char aNext, char *dst)
 	return 1;
 }
 
-static void ny_encode(const char *src, size_t srclen, zend_long max_length, smart_str *out)
+static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_length)
 {
 	char *s;
 	char *key;
+	zend_string *ret;
 	size_t n, klen, i;
 
 	s = emalloc(srclen + 1);
 	n = ny_clean(src, srclen, s);
 	if (n == 0) {
 		efree(s);
-		return;
+		return ZSTR_EMPTY_ALLOC();
 	}
 
 	/* First-character rules. Each is anchored at the start and the set is
@@ -180,19 +180,18 @@ static void ny_encode(const char *src, size_t srclen, zend_long max_length, smar
 	if (max_length > 0 && klen > (size_t) max_length) {
 		klen = (size_t) max_length;
 	}
-	if (klen > 0) {
-		smart_str_appendl(out, key, klen);
-	}
+	ret = klen > 0 ? zend_string_init(key, klen, 0) : ZSTR_EMPTY_ALLOC();
 
 	efree(key);
 	efree(s);
+	return ret;
 }
 
 PHP_FUNCTION(nysiis)
 {
 	zend_string *input;
 	zend_long max_length = 6;
-	smart_str out = {0};
+	zend_string *out;
 
 	ZEND_PARSE_PARAMETERS_START(1, 2)
 		Z_PARAM_STR(input)
@@ -200,22 +199,15 @@ PHP_FUNCTION(nysiis)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	ny_encode(ZSTR_VAL(input), ZSTR_LEN(input), max_length, &out);
-
-	if (out.s != NULL) {
-		smart_str_0(&out);
-		RETVAL_STRINGL(ZSTR_VAL(out.s), ZSTR_LEN(out.s));
-		smart_str_free(&out);
-	} else {
-		RETVAL_EMPTY_STRING();
-	}
+	out = ny_encode(ZSTR_VAL(input), ZSTR_LEN(input), max_length);
+	RETURN_STR(out);
 }
 
 PHP_FUNCTION(nysiis_match)
 {
 	zend_string *a, *b;
 	zend_long max_length = 6;
-	smart_str ka = {0}, kb = {0};
+	zend_string *ka, *kb;
 	zend_bool matched = 0;
 
 	ZEND_PARSE_PARAMETERS_START(2, 3)
@@ -225,20 +217,18 @@ PHP_FUNCTION(nysiis_match)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	ny_encode(ZSTR_VAL(a), ZSTR_LEN(a), max_length, &ka);
-	ny_encode(ZSTR_VAL(b), ZSTR_LEN(b), max_length, &kb);
+	ka = ny_encode(ZSTR_VAL(a), ZSTR_LEN(a), max_length);
+	kb = ny_encode(ZSTR_VAL(b), ZSTR_LEN(b), max_length);
 
 	/* NYSIIS yields a single key; two names match when the keys are equal.
 	 * A name that produces no key never matches (consistent with the other
 	 * *_match helpers, where an empty/unencodable input is never a homophone). */
-	if (ka.s != NULL && kb.s != NULL) {
-		smart_str_0(&ka);
-		smart_str_0(&kb);
-		matched = zend_string_equals(ka.s, kb.s);
+	if (ZSTR_LEN(ka) > 0 && ZSTR_LEN(kb) > 0) {
+		matched = zend_string_equals(ka, kb);
 	}
 
-	smart_str_free(&ka);
-	smart_str_free(&kb);
+	zend_string_release(ka);
+	zend_string_release(kb);
 
 	RETURN_BOOL(matched);
 }

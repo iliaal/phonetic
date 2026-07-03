@@ -72,3 +72,4 @@ tests/**/*.php
 
 # CodeSage local index and review state
 /.codesage/
+.plan/

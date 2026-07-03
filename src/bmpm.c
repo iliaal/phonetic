@@ -827,6 +827,29 @@ static char *pb_makestring(pbuilder *pb, size_t *outlen)
 	return r;
 }
 
+static char *bm_pair_string(const char *renc, size_t rr, const char *cenc, size_t cr, size_t *outlen)
+{
+	size_t len = rr + cr + 5;
+	char *out = emalloc(len + 1);
+	size_t pos = 0;
+
+	out[pos++] = '(';
+	if (rr) {
+		memcpy(out + pos, renc, rr);
+		pos += rr;
+	}
+	memcpy(out + pos, ")-(", 3);
+	pos += 3;
+	if (cr) {
+		memcpy(out + pos, cenc, cr);
+		pos += cr;
+	}
+	out[pos++] = ')';
+	out[pos] = '\0';
+	*outlen = pos;
+	return out;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Language guessing + MINIT-built pre-parsed guess rules                  */
 /* ---------------------------------------------------------------------- */
@@ -993,23 +1016,16 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 			size_t rr, cr;
 			uint32_t *cbuf = safe_emalloc(tn, sizeof(uint32_t), 0);
 			char *renc, *cenc;
-			smart_str s = {0};
 			cbuf[0] = 'd';
 			memcpy(cbuf + 1, tcp + 2, (size_t) (tn - 2) * sizeof(uint32_t));
 			renc = bm_encode_sub(nt, rt, forced, tcp + 2, tn - 2, &rr, depth + 1);
 			cenc = bm_encode_sub(nt, rt, forced, cbuf, tn - 1, &cr, depth + 1);
 			efree(cbuf);
-			smart_str_appendc(&s, '(');
-			smart_str_appendl(&s, renc, rr);
-			smart_str_appendl(&s, ")-(", 3);
-			smart_str_appendl(&s, cenc, cr);
-			smart_str_appendc(&s, ')');
-			smart_str_0(&s);
-			efree(renc); efree(cenc);
-			*outlen = ZSTR_LEN(s.s);
-			char *out = estrndup(ZSTR_VAL(s.s), ZSTR_LEN(s.s));
-			smart_str_free(&s);
-			return out;
+			{
+				char *out = bm_pair_string(renc, rr, cenc, cr, outlen);
+				efree(renc); efree(cenc);
+				return out;
+			}
 		}
 		{
 			int pi;
@@ -1027,23 +1043,16 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 					int remn = tn - (ll + 1);
 					uint32_t *cbuf = safe_emalloc((size_t) (ll + remn), sizeof(uint32_t), 0);
 					char *renc, *cenc;
-					smart_str s = {0};
 					for (k = 0; k < ll; k++) cbuf[k] = (uint32_t) (unsigned char) l[k];
 					memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
 					renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1);
 					cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1);
 					efree(cbuf);
-					smart_str_appendc(&s, '(');
-					smart_str_appendl(&s, renc, rr);
-					smart_str_appendl(&s, ")-(", 3);
-					smart_str_appendl(&s, cenc, cr);
-					smart_str_appendc(&s, ')');
-					smart_str_0(&s);
-					efree(renc); efree(cenc);
-					*outlen = ZSTR_LEN(s.s);
-					char *out = estrndup(ZSTR_VAL(s.s), ZSTR_LEN(s.s));
-					smart_str_free(&s);
-					return out;
+					{
+						char *out = bm_pair_string(renc, rr, cenc, cr, outlen);
+						efree(renc); efree(cenc);
+						return out;
+					}
 				}
 			}
 		}
