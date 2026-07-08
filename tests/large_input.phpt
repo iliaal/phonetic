@@ -11,11 +11,15 @@ $code = double_metaphone(str_repeat("schm", 5000), 0);
 var_dump(strlen($code['primary']), strlen($code['alternate']));
 // MRA first3+last3 keeps the code at 6 no matter the input size.
 var_dump(strlen(match_rating(str_repeat("br", 20000))));
-var_dump(is_string(bmpm(str_repeat("a", 20000))));
+try {
+    bmpm(str_repeat("a", 20000));
+} catch (\ValueError $e) {
+    echo $e->getMessage(), "\n";
+}
 ?>
 --EXPECT--
 int(40000)
 int(10000)
 int(10000)
 int(6)
-bool(true)
+bmpm(): Argument #1 ($string) must not exceed 4096 bytes

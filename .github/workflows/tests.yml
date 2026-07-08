@@ -106,7 +106,7 @@ jobs:
       - name: Build extension
         run: |
           phpize
-          ./configure --enable-phonetic
+          ./configure --enable-phonetic --enable-phonetic-dev
           make -j$(sysctl -n hw.ncpu)
 
       - name: Run tests

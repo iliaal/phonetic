@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`thumb` → `0M|TM`), GH at word positions 1-2 falls through to Parker's rule
   (`high`/`hugh` → `H`), bare `jose` takes the Spanish-H primary (`HS|HS`), and
   germanic CH covers word-final position (`mooch` → `MK`).
+- `double_metaphone()`: leading and trailing spaces no longer break word-start
+  anchors such as the leading vowel in `Otto` or silent `KN` in `KNIGHT`.
+- `double_metaphone()`: word-final `-gier` now uses the French soft-G branch, so
+  `brigier` returns the Commons Codec parity code `PRJ|PRJR`.
 - `double_metaphone()`: malformed UTF-8 no longer swallows the letters after a
   stray lead byte; invalid sequences fold byte-wise (Latin-1 fallback), like
   the other encoders.
@@ -31,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - U+0130 (`İ`) now lower-cases to `i` in `bmpm()` and `dm_soundex()` instead of
   vanishing via a wrong İ→ı case pairing, so `İstanbul` matches `istanbul`.
 
+### Security
+
+- `match_rating()` and `match_rating_compare()` no longer write past the clean
+  buffer when malformed UTF-8 falls back to bare Latin-1 `0xDF` and expands to
+  `SS`.
+- `bmpm()` and `bmpm_match()` now reject input over 4096 bytes with a
+  `ValueError`, matching the existing Daitch-Mokotoff input cap for untrusted
+  strings.
+
 ### Changed
 
 - The five comparison helpers' parameters are named `$a`/`$b` (as the README
@@ -40,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix recursion; Double Metaphone literal matching no longer calls
   `strlen`/`memcmp` through an out-of-line helper; Daitch-Mokotoff reuses its
   branch-set buffers across positions.
+
+### For contributors
+
+- macOS CI now builds with `--enable-phonetic-dev`, so it enforces the same
+  warning-clean build as Linux.
+- Generated BMPM table decoding now fails module initialization if a checked-in
+  table exceeds the generator's fixed C buffer caps.
 
 ## [0.2.0] - 2026-06-30
 

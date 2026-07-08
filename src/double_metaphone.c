@@ -36,6 +36,7 @@
 #define DMET_PREPAD  2
 #define DMET_POSTPAD 8
 #define DMET_SENTINEL '-'
+#define DMET_MAX_FOLDED_INPUT (INT_MAX - (DMET_PREPAD + DMET_POSTPAD + 1))
 
 static zend_always_inline int dmet_is_vowel(char c)
 {
@@ -147,9 +148,9 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 
 	/* The encoder walks the padded buffer with signed int cursors; a folded
 	 * length that would overflow them must be refused before the narrowing cast
-	 * below undersizes the allocation. Unreachable under any sane memory_limit
-	 * (folding never expands, so this needs a ~2GB input). */
-	if (len > (size_t) INT_MAX - (DMET_PREPAD + DMET_POSTPAD + 1)) {
+	 * below undersizes the allocation. Unreachable under any sane memory_limit,
+	 * but folded length can exceed input length for Latin expansions like ß. */
+	if (len > (size_t) DMET_MAX_FOLDED_INPUT) {
 		return;
 	}
 
@@ -161,6 +162,16 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 
 	start = DMET_PREPAD;
 	end = DMET_PREPAD + (int) len - 1;
+	while (start <= end && buf[start] == ' ') {
+		start++;
+	}
+	while (end >= start && buf[end] == ' ') {
+		end--;
+	}
+	if (start > end) {
+		efree(buf);
+		return;
+	}
 
 	slavo = (memchr(folded, 'W', len) != NULL) || (memchr(folded, 'K', len) != NULL);
 	if (!slavo) {
@@ -177,12 +188,12 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 #define SAT(i, s)  dmet_string_at(buf, total, (i), "" s, sizeof(s) - 1)
 
 	/* check_word_start: skip a silent leading cluster, and map an initial X to S. */
-	pos = DMET_PREPAD;
+	pos = start;
 	if (SAT(pos, "GN") || SAT(pos, "KN") || SAT(pos, "PN")
 			|| SAT(pos, "WR") || SAT(pos, "PS")) {
 		pos++;
 	}
-	if (B(DMET_PREPAD) == 'X') {
+	if (B(start) == 'X') {
 		smart_str_appendc(primary, 'S');
 		smart_str_appendc(secondary, 'S');
 		pos++;
@@ -403,7 +414,7 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 							|| SAT(pos + 1, "ET")) {
 						pc = sc = "K";
 						adv = 2;
-					} else if (SAT(pos + 1, "IER ")) {
+					} else if (SAT(pos + 1, "IER") && (B(pos + 4) == ' ' || pos + 3 >= end)) {
 						pc = sc = "J";
 						adv = 2;
 					} else {
@@ -723,6 +734,11 @@ PHP_FUNCTION(double_metaphone)
 	ZEND_PARSE_PARAMETERS_END();
 
 	dmet_fold(ZSTR_VAL(input), ZSTR_LEN(input), &folded);
+	if (folded.s != NULL && ZSTR_LEN(folded.s) > (size_t) DMET_MAX_FOLDED_INPUT) {
+		smart_str_free(&folded);
+		zend_argument_value_error(1, "must not exceed %d bytes after folding", DMET_MAX_FOLDED_INPUT);
+		RETURN_THROWS();
+	}
 
 	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
 		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), &primary, &secondary);
@@ -759,11 +775,16 @@ PHP_FUNCTION(double_metaphone)
 }
 
 /* Fold + encode one string into its untruncated primary/alternate codes. */
-static void dmet_codes(const char *in, size_t len, smart_str *primary, smart_str *secondary)
+static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *primary, smart_str *secondary)
 {
 	smart_str folded = {0};
 
 	dmet_fold(in, len, &folded);
+	if (folded.s != NULL && ZSTR_LEN(folded.s) > (size_t) DMET_MAX_FOLDED_INPUT) {
+		smart_str_free(&folded);
+		zend_argument_value_error(arg_num, "must not exceed %d bytes after folding", DMET_MAX_FOLDED_INPUT);
+		return FAILURE;
+	}
 	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
 		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary);
 	}
@@ -774,6 +795,7 @@ static void dmet_codes(const char *in, size_t len, smart_str *primary, smart_str
 		smart_str_0(secondary);
 	}
 	smart_str_free(&folded);
+	return SUCCESS;
 }
 
 /* Two non-empty codes of equal (capped) length comparing identical. */
@@ -805,8 +827,14 @@ PHP_FUNCTION(double_metaphone_match)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), &pa, &sa);
-	dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), &pb, &sb);
+	if (dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), 1, &pa, &sa) == FAILURE
+			|| dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), 2, &pb, &sb) == FAILURE) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		smart_str_free(&pb);
+		smart_str_free(&sb);
+		RETURN_THROWS();
+	}
 
 	/* max_length <= 0 means "no limit": compare the full codes. */
 	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;

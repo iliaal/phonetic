@@ -50,8 +50,10 @@ In scope:
   the BMPM `name_type` / `accuracy` / `language` arguments.
 - Uncontrolled CPU or memory consumption from crafted input
   disproportionate to its size, such as super-linear BMPM expansion or
-  runaway recursion. Input-length caps and recursion bounds are
-  security boundaries; bypasses of them are in scope.
+  runaway recursion. `bmpm()`, `bmpm_match()`, `dm_soundex()`, and
+  `dm_soundex_match()` reject inputs over 4096 bytes; those caps and the
+  BMPM recursion bound are security boundaries, and bypasses of them are
+  in scope.
 - Arginfo / ZPP mismatches that cause undefined behavior reachable from
   PHP.
 
@@ -59,6 +61,6 @@ Out of scope:
 
 - Phonetically "wrong" output. The encoders are heuristics; a key you
   disagree with is a correctness question, not a vulnerability.
-- Passing untrusted input to the extension without your own length
+- Passing untrusted input to uncapped encoders without your own length
   limits. Bound input size at the application layer as you would for
   any string-processing routine.

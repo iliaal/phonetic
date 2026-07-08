@@ -109,7 +109,7 @@ static int mra_trivial(const char *s, size_t len)
  * fold accents. Returns an emalloc'd buffer; *outlen gets its length. */
 static char *mra_clean(const char *src, size_t len, size_t *outlen)
 {
-	char *out = emalloc(len + 1);
+	char *out = safe_emalloc(len, 2, 1);
 	size_t i = 0, n = 0;
 
 	while (i < len) {
@@ -138,6 +138,7 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 		}
 	}
 
+	out[n] = '\0';
 	*outlen = n;
 	return out;
 }
@@ -253,6 +254,9 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 	int n2 = (int) nb - 1;
 	int i, la = 0, lb = 0, longer, r;
 
+	if (na > 6 || nb > 6) {
+		return 0;
+	}
 	ZEND_ASSERT(na <= sizeof(ca) && nb <= sizeof(cb));
 	memcpy(ca, a, na);
 	memcpy(cb, b, nb);

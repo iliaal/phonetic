@@ -18,6 +18,9 @@ var_dump(double_metaphone_match("", ""));
 var_dump(double_metaphone_match("x", ""));
 // max_length is honoured: full codes still match an identical word
 var_dump(double_metaphone_match("Wisniewski", "Wisniewski", 0));
+// Truncated codes can collide; full-length comparison must not inherit that match.
+var_dump(double_metaphone_match("Westerlund", "Westerberg", 4));
+var_dump(double_metaphone_match("Westerlund", "Westerberg", 0));
 ?>
 --EXPECT--
 int(2)
@@ -29,3 +32,5 @@ int(0)
 int(0)
 int(0)
 int(2)
+int(2)
+int(0)

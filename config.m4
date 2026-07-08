@@ -1,7 +1,7 @@
 dnl config.m4 for extension phonetic
 
 PHP_ARG_ENABLE(phonetic, whether to enable phonetic support,
-[  --enable-phonetic       Enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff) support])
+[  --enable-phonetic       Enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff, NYSIIS, Match Rating) support])
 
 PHP_ARG_ENABLE(phonetic-dev, whether to enable developer build flags,
 [  --enable-phonetic-dev   Upgrade wrapper warnings to -Werror plus strict checks], no, no)

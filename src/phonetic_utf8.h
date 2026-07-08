@@ -71,7 +71,7 @@ static inline uint32_t *ph_u8_decode(const char *s, size_t len, int *n)
 }
 
 /* Decode a NUL-terminated UTF-8 string into buf, up to cap code points.
- * Returns the number of code points written. */
+ * Returns the number of code points written, or -1 when cap is too small. */
 static inline int ph_u8_decode_buf(const char *s, uint32_t *buf, int cap)
 {
 	int k = 0;
@@ -81,6 +81,9 @@ static inline int ph_u8_decode_buf(const char *s, uint32_t *buf, int cap)
 		int clen;
 		buf[k++] = ph_u8_next(s + i, len - i, &clen);
 		i += (size_t) clen;
+	}
+	if (i < len) {
+		return -1;
 	}
 	return k;
 }

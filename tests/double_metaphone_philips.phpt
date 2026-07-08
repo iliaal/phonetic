@@ -16,6 +16,7 @@ t("hugh");
 t("agha");
 t("jose");
 t("san jose");
+t("brigier");
 t("mooch");
 t("pooch");
 t("thumbs");
@@ -32,6 +33,7 @@ hugh       H|H
 agha       AK|AK
 jose       HS|HS
 san jose   SNHS|SNHS
+brigier    PRJ|PRJR
 mooch      MK|MK
 pooch      PK|PK
 thumbs     0MPS|TMPS

@@ -75,7 +75,7 @@ static int dms_is_ws(uint32_t cp)
 typedef struct {
 	char code[DMS_MAX + 1];   /* accumulated digits, NUL-terminated */
 	int  len;
-	char lastrep[4];          /* last replacement applied (<= 2 chars) */
+	char lastrep[4];          /* last replacement applied (<= 3 chars) */
 	int  last_null;           /* 1 while no replacement has been applied yet */
 } dms_branch;
 

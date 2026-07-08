@@ -38,6 +38,7 @@
 #include "bmpm_data.h"
 
 #define BMPM_MAX_PHONEMES 20
+#define BMPM_MAX_INPUT 4096
 
 /* The GENERIC d'/name-prefix handling recurses (bm_encode_core -> bm_encode_sub
  * -> bm_encode_core), peeling one code point per level. Real names nest at most
@@ -310,14 +311,23 @@ static int bm_regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, i
 	return bm_atoms_find(as, ae, atoms, na, seg, sn);
 }
 
+static int bm_decode_buf_or_fail(const char *s, uint32_t *buf, int cap, const char *what)
+{
+	int n = ph_u8_decode_buf(s, buf, cap);
+	if (n < 0) {
+		zend_error_noreturn(E_CORE_ERROR, "phonetic: generated BMPM %s exceeds %d code points", what, cap);
+	}
+	return n;
+}
+
 /* Build the anchored, decoded context regex for a rule context at MINIT.
  * side 0 = left (raw + "$"), side 1 = right ("^" + raw). The run-time matcher
  * bm_ctx_match_pre consumes the result, so the per-match u8_decode + R-assembly is
  * paid once at module load instead of on every candidate rule. */
 static uint32_t *bm_build_ctx_R(const char *raw, int side, int *Rn_out)
 {
-	uint32_t rb[128];
-	int rn = ph_u8_decode_buf(raw, rb, 128);
+	uint32_t rb[64];
+	int rn = bm_decode_buf_or_fail(raw, rb, 64, "rule context");
 	int Rn = 0, i;
 	uint32_t *R = pemalloc((size_t) (rn + 1) * sizeof(uint32_t), 1);
 
@@ -389,6 +399,7 @@ static int bm_ctx_match_pre(const uint32_t *R, int Rn, const uint32_t *seg, int 
 typedef struct {
 	char     *t;
 	size_t    tn;
+	size_t    cap;
 	langset_t langs;
 	char      inl[PHON_INL + 1];
 } phon_t;
@@ -428,9 +439,11 @@ static void pb_push(pbuilder *pb, const char *lt, size_t ln, const char *rt, siz
 	if (tot <= PHON_INL) {
 		p->t = NULL;
 		dst = p->inl;
+		p->cap = PHON_INL;
 	} else {
 		p->t = emalloc(tot + 1);
 		dst = p->t;
+		p->cap = tot;
 	}
 	if (ln) memcpy(dst, lt, ln);
 	if (rn) memcpy(dst + ln, rt, rn);
@@ -438,6 +451,18 @@ static void pb_push(pbuilder *pb, const char *lt, size_t ln, const char *rt, siz
 	p->tn = tot;
 	p->langs = langs;
 	pb->n++;
+}
+
+static size_t pb_next_text_cap(size_t cap, size_t need)
+{
+	size_t nc = cap > PHON_INL ? cap : PHON_INL + 1;
+	while (nc < need) {
+		if (nc > SIZE_MAX / 2) {
+			return need;
+		}
+		nc *= 2;
+	}
+	return nc;
 }
 
 static void pb_free(pbuilder *pb)
@@ -466,17 +491,20 @@ static void pb_append_all(pbuilder *pb, const char *s, size_t sn)
 			memcpy(p->inl + p->tn, s, sn);
 			p->inl[tot] = '\0';
 		} else if (p->t) {
-			/* grow in place; the allocator's size classes amortize repeated
-			 * single-byte appends without an explicit capacity field */
-			p->t = erealloc(p->t, tot + 1);
+			if (tot > p->cap) {
+				p->cap = pb_next_text_cap(p->cap, tot);
+				p->t = erealloc(p->t, p->cap + 1);
+			}
 			memcpy(p->t + p->tn, s, sn);
 			p->t[tot] = '\0';
 		} else {
-			char *nt = emalloc(tot + 1);
+			size_t nc = pb_next_text_cap(PHON_INL, tot);
+			char *nt = emalloc(nc + 1);
 			if (p->tn) memcpy(nt, p->inl, p->tn);
 			memcpy(nt + p->tn, s, sn);
 			nt[tot] = '\0';
 			p->t = nt;
+			p->cap = nc;
 		}
 		p->tn = tot;
 	}
@@ -679,7 +707,7 @@ static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 				const uint32_t *pat = ix->decoded[r].pat;
 				int plen = ix->decoded[r].plen;
 				if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
-				if (i + plen > n) continue;
+				if (plen > n - i) continue;
 				if (!bm_seqeq(cp + i, plen, pat, plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, cp, i)) continue;
@@ -753,7 +781,7 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 					const uint32_t *pat = ix->decoded[r].pat;
 					int plen = ix->decoded[r].plen;
 					if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
-					if (i + plen > tn) continue;
+					if (plen > tn - i) continue;
 					if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
 					if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
 					if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
@@ -1173,6 +1201,48 @@ static char *bm_encode_string(int nt, int rt, langset_t forced, const char *inpu
 	return out;
 }
 
+static int bm_validate_name_type(zend_long name_type, uint32_t arg_num)
+{
+	if (name_type != BMPM_GEN && name_type != BMPM_ASH && name_type != BMPM_SEP) {
+		zend_argument_value_error(arg_num, "must be one of BMPM_GENERIC, BMPM_ASHKENAZI, or BMPM_SEPHARDIC");
+		return FAILURE;
+	}
+	return SUCCESS;
+}
+
+static int bm_validate_accuracy(zend_long accuracy, uint32_t arg_num)
+{
+	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
+		zend_argument_value_error(arg_num, "must be either BMPM_APPROX or BMPM_EXACT");
+		return FAILURE;
+	}
+	return SUCCESS;
+}
+
+static int bm_validate_input_len(zend_string *input, uint32_t arg_num)
+{
+	if (ZSTR_LEN(input) > BMPM_MAX_INPUT) {
+		zend_argument_value_error(arg_num, "must not exceed %d bytes", BMPM_MAX_INPUT);
+		return FAILURE;
+	}
+	return SUCCESS;
+}
+
+static int bm_forced_language(int nt, zend_string *language, uint32_t arg_num, langset_t *forced)
+{
+	*forced = LS_NONE;
+	if (language != NULL && ZSTR_LEN(language) > 0) {
+		int idx = bm_lang_index(nt, ZSTR_VAL(language), ZSTR_LEN(language));
+		if (idx < 0) {
+			zend_argument_value_error(arg_num, "\"%s\" is not a known language for the given name type",
+			                          ZSTR_VAL(language));
+			return FAILURE;
+		}
+		*forced = (langset_t) (1u << idx);
+	}
+	return SUCCESS;
+}
+
 /* ---------------------------------------------------------------------- */
 /* PHP function                                                           */
 /* ---------------------------------------------------------------------- */
@@ -1185,6 +1255,7 @@ PHP_FUNCTION(bmpm)
 	zend_string *language = NULL;
 	char *result;
 	size_t result_len = 0;
+	langset_t forced;
 
 	ZEND_PARSE_PARAMETERS_START(1, 4)
 		Z_PARAM_STR(input)
@@ -1194,36 +1265,15 @@ PHP_FUNCTION(bmpm)
 		Z_PARAM_STR(language)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (name_type != BMPM_GEN && name_type != BMPM_ASH && name_type != BMPM_SEP) {
-		zend_argument_value_error(2, "must be one of BMPM_GENERIC, BMPM_ASHKENAZI, or BMPM_SEPHARDIC");
-		RETURN_THROWS();
-	}
-	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
-		zend_argument_value_error(3, "must be either BMPM_APPROX or BMPM_EXACT");
-		RETURN_THROWS();
-	}
-
-	/* The code-point decoders index with signed int; refuse an input whose byte
-	 * length would overflow them before u8_decode's counter wraps. Unreachable
-	 * under any sane memory_limit (needs a ~2GB string). */
-	if (ZSTR_LEN(input) > (size_t) INT_MAX) {
-		zend_argument_value_error(1, "is too long");
+	if (bm_validate_name_type(name_type, 2) == FAILURE
+			|| bm_validate_accuracy(accuracy, 3) == FAILURE
+			|| bm_validate_input_len(input, 1) == FAILURE
+			|| bm_forced_language((int) name_type, language, 4, &forced) == FAILURE) {
 		RETURN_THROWS();
 	}
 
-	if (language != NULL && ZSTR_LEN(language) > 0) {
-		int idx = bm_lang_index((int) name_type, ZSTR_VAL(language), ZSTR_LEN(language));
-		if (idx < 0) {
-			zend_argument_value_error(4, "\"%s\" is not a known language for the given name type",
-			                          ZSTR_VAL(language));
-			RETURN_THROWS();
-		}
-		result = bm_encode_string((int) name_type, (int) accuracy, (langset_t) (1u << idx),
-		                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
-	} else {
-		result = bm_encode_string((int) name_type, (int) accuracy, LS_NONE,
-		                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
-	}
+	result = bm_encode_string((int) name_type, (int) accuracy, forced,
+	                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
 
 	RETVAL_STRINGL(result, result_len);
 	efree(result);
@@ -1280,7 +1330,7 @@ PHP_FUNCTION(bmpm_match)
 	zend_string *language = NULL;
 	char *ra, *rb;
 	size_t ral = 0, rbl = 0;
-	int lang_idx = -1;
+	langset_t forced;
 	zend_bool matched;
 
 	ZEND_PARSE_PARAMETERS_START(2, 5)
@@ -1292,36 +1342,16 @@ PHP_FUNCTION(bmpm_match)
 		Z_PARAM_STR(language)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (name_type != BMPM_GEN && name_type != BMPM_ASH && name_type != BMPM_SEP) {
-		zend_argument_value_error(3, "must be one of BMPM_GENERIC, BMPM_ASHKENAZI, or BMPM_SEPHARDIC");
+	if (bm_validate_name_type(name_type, 3) == FAILURE
+			|| bm_validate_accuracy(accuracy, 4) == FAILURE
+			|| bm_validate_input_len(a, 1) == FAILURE
+			|| bm_validate_input_len(b, 2) == FAILURE
+			|| bm_forced_language((int) name_type, language, 5, &forced) == FAILURE) {
 		RETURN_THROWS();
-	}
-	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
-		zend_argument_value_error(4, "must be either BMPM_APPROX or BMPM_EXACT");
-		RETURN_THROWS();
-	}
-	if (ZSTR_LEN(a) > (size_t) INT_MAX) {
-		zend_argument_value_error(1, "is too long");
-		RETURN_THROWS();
-	}
-	if (ZSTR_LEN(b) > (size_t) INT_MAX) {
-		zend_argument_value_error(2, "is too long");
-		RETURN_THROWS();
-	}
-	if (language != NULL && ZSTR_LEN(language) > 0) {
-		lang_idx = bm_lang_index((int) name_type, ZSTR_VAL(language), ZSTR_LEN(language));
-		if (lang_idx < 0) {
-			zend_argument_value_error(5, "\"%s\" is not a known language for the given name type",
-			                          ZSTR_VAL(language));
-			RETURN_THROWS();
-		}
 	}
 
-	{
-		langset_t forced = lang_idx >= 0 ? (langset_t) (1u << lang_idx) : LS_NONE;
-		ra = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
-		rb = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
-	}
+	ra = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
+	rb = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
 
@@ -1351,7 +1381,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 	ix->decoded = pemalloc(rs->count * sizeof(rule_decoded), 1);
 	for (i = 0; i < rs->count; i++) {
 		uint32_t b[64];
-		ix->decoded[i].plen = ph_u8_decode_buf(rs->rules[i].pattern, b, 64);
+		ix->decoded[i].plen = bm_decode_buf_or_fail(rs->rules[i].pattern, b, 64, "rule pattern");
 		total += (size_t) ix->decoded[i].plen;
 	}
 	ix->arena = pemalloc((total ? total : 1) * sizeof(uint32_t), 1);
@@ -1359,7 +1389,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 		int pl = ix->decoded[i].plen;
 		alt_t tmp_alts[64];
 		int na;
-		ph_u8_decode_buf(rs->rules[i].pattern, ix->arena + pos, pl);
+		bm_decode_buf_or_fail(rs->rules[i].pattern, ix->arena + pos, pl, "rule pattern");
 		ix->decoded[i].pat = ix->arena + pos;
 		pos += (size_t) pl;
 		ix->decoded[i].lctx = bm_build_ctx_R(rs->rules[i].lcontext, 0, &ix->decoded[i].lctx_n);
@@ -1416,9 +1446,9 @@ static void bm_build_lang_index(const bmpm_lang_set *S, int nt, langset_index *l
 	li->rules = pemalloc((S->count ? S->count : 1) * sizeof(lang_parsed), 1);
 	for (r = 0; r < S->count; r++) {
 		lang_parsed *lp = &li->rules[r];
-		uint32_t buf[512];
+		uint32_t buf[128];
 		atom_t tmp[128];
-		int dn = ph_u8_decode_buf(S->rules[r].pattern, buf, 512);
+		int dn = bm_decode_buf_or_fail(S->rules[r].pattern, buf, 128, "language pattern");
 		int as, ae, na;
 		lp->R = pemalloc((dn ? (size_t) dn : 1) * sizeof(uint32_t), 1);
 		if (dn) memcpy(lp->R, buf, (size_t) dn * sizeof(uint32_t));

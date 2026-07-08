@@ -112,7 +112,7 @@ Each encoder produces a different output shape, so "do these sound alike?" needs
 ```php
 // Double Metaphone: 2 = primary keys agree, 1 = an alternate crosses, 0 = no match
 // (a word-final J emits a trailing space into the alternate code, per the
-// published algorithm — compare codes as returned, don't trim them)
+// published algorithm; compare codes as returned, don't trim them)
 double_metaphone_match(string $a, string $b, int $max_length = 4): int
 double_metaphone_match("Catherine", "Kathryn");          // 2
 double_metaphone_match("Vagner", "Wagner");              // 1
@@ -198,14 +198,9 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   Apache Commons Codec.
 - `nysiis()` and `match_rating()` operate on ASCII letters; `match_rating()`
   also folds the Latin-1/Latin-Extended accent set the reference handles.
-- `bmpm()` cost grows faster than linearly with input length (roughly n^1.45 in
-  practice, because it joins every word and runs three rule passes over the
-  result). A single name is short, but a multi-kilobyte string can take seconds,
-  so cap untrusted input length before you encode it.
-- `dm_soundex()` and `dm_soundex_match()` reject input longer than 4096 bytes
-  with a `ValueError`. Real names are far shorter; the cap bounds the
-  per-character branch work so an untrusted multi-megabyte string can't turn the
-  encoder into a CPU sink.
+- `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
+  input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
+  the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.
 
 ## 🔗 Native PHP extensions
 

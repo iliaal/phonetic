@@ -5,7 +5,7 @@
 // + Daitch-Mokotoff, vendored from Apache Commons Codec) is compiled in via the
 // generated src/bmpm_data.h, so there is no external library dependency.
 
-ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff) support", "no");
+ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff, NYSIIS, Match Rating) support", "no");
 ARG_ENABLE("phonetic-dev", "phonetic: treat compiler warnings as errors (/WX)", "no");
 
 if (PHP_PHONETIC != "no") {
