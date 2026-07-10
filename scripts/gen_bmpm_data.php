@@ -69,10 +69,10 @@ function cp_count(string $s): int
  * the buffer it protects.
  */
 const CAP_BM_PATTERN_CPS  = 64;   /* build_ruleset_index: uint32_t b[64] */
-const CAP_BM_CONTEXT_CPS  = 64;   /* build_ctx_R rb[128] incl. anchor; regex_atom_match atoms[64] */
+const CAP_BM_CONTEXT_CPS  = 64;   /* build_ctx_R rb[64] (anchor added into heap R); regex_atom_match atoms[64] */
 const CAP_BM_PHONEME_ALTS = 63;   /* parse_phoneme_expr: alts[64]/segs[64] incl. silent alt */
 const CAP_BM_LANG_BRACKET = 63;   /* parse_phoneme_expr: lb[64] NUL-terminated */
-const CAP_BM_GUESS_CPS    = 128;  /* build_lang_index: buf[512], atom_t tmp[128]; atoms <= cps */
+const CAP_BM_GUESS_CPS    = 128;  /* build_lang_index: buf[128], atom_t tmp[128]; atoms <= cps */
 const CAP_BM_LANGUAGES    = 31;   /* langset_t bitmask; 1u << count is UB at 32 (LS_ANY sentinel) */
 const CAP_DM_CODE_ALTS    = 8;    /* dms_encode: alts[8][4] */
 const CAP_DM_CODE_LEN     = 3;    /* dms_encode: alts[.][4] NUL-terminated */

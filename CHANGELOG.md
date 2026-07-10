@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   germanic CH covers word-final position (`mooch` → `MK`).
 - `double_metaphone()`: leading and trailing spaces no longer break word-start
   anchors such as the leading vowel in `Otto` or silent `KN` in `KNIGHT`.
-- `double_metaphone()`: word-final `-gier` now uses the French soft-G branch, so
-  `brigier` returns the Commons Codec parity code `PRJ|PRJR`.
+- `double_metaphone()`: `-gier` now uses the French soft-G branch wherever it
+  appears, not only at a word end, so `brigier` returns the Commons Codec parity
+  code `PRJ|PRJR` and `angiera` returns `ANJR|ANJR`.
 - `double_metaphone()`: malformed UTF-8 no longer swallows the letters after a
   stray lead byte; invalid sequences fold byte-wise (Latin-1 fallback), like
   the other encoders.

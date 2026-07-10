@@ -414,7 +414,7 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 							|| SAT(pos + 1, "ET")) {
 						pc = sc = "K";
 						adv = 2;
-					} else if (SAT(pos + 1, "IER") && (B(pos + 4) == ' ' || pos + 3 >= end)) {
+					} else if (SAT(pos + 1, "IER")) {
 						pc = sc = "J";
 						adv = 2;
 					} else {
