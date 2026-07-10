@@ -21,6 +21,10 @@ t("Otto", "Otto");
 t(" Otto", "lead");
 t("Otto ", "trail");
 t(" KNIGHT", "leadKN");
+t("\tOtto", "tabLead");
+t("\nOtto", "nlLead");
+t("Otto\t", "tabTrail");
+t("\tKNIGHT", "tabKN");
 t("Auto", "Auto");
 t("Aaron", "Aaron");
 t("over", "over");
@@ -38,6 +42,10 @@ Otto     [AT] | [AT]
 lead     [AT] | [AT]
 trail    [AT] | [AT]
 leadKN   [NT] | [NT]
+tabLead  [AT] | [AT]
+nlLead   [AT] | [AT]
+tabTrail [AT] | [AT]
+tabKN    [NT] | [NT]
 Auto     [AT] | [AT]
 Aaron    [ARN] | [ARN]
 over     [AFR] | [AFR]

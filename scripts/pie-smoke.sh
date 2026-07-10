@@ -3,8 +3,10 @@ set -euo pipefail
 
 # PIE install smoke test for iliaal/phonetic. Runs in a clean php:<ver>-cli
 # container with this repo mounted at /phonetic. After a release, exercises
-# the real-user `pie install iliaal/phonetic` path against Packagist, with a
-# manual phpize+make+install fallback for the source-build lane.
+# the real-user `pie install iliaal/phonetic` path against Packagist. A PIE
+# install failure is fatal by default (that is the path under test); set
+# ALLOW_MANUAL_FALLBACK=1 to fall back to phpize+make+install for local
+# source-build iteration only.
 #
 #   docker run --rm -v "$PWD":/phonetic:ro php:8.4-cli bash /phonetic/scripts/pie-smoke.sh
 
@@ -68,14 +70,24 @@ echo
 
 echo "---- 6. Verify extension loads ----"
 if [ "$PIE_OK" = "0" ]; then
-    echo "   *** PIE did not install the extension; falling back to manual phpize+make+install ***"
+    # The whole point of this smoke test is the `pie install` path. A manual
+    # phpize fallback that silently rescues a broken PIE/Packagist/prebuilt-asset
+    # install would report PASSED while hiding the exact regression under test.
+    # Fail hard by default; the manual fallback is opt-in for local iteration.
+    if [ "${ALLOW_MANUAL_FALLBACK:-0}" != "1" ]; then
+        echo "   *** pie install iliaal/phonetic FAILED (PIE_OK=0). ***" >&2
+        echo "   *** This smoke test exercises the PIE/Packagist path; not masking it with a manual build. ***" >&2
+        echo "   *** Set ALLOW_MANUAL_FALLBACK=1 to fall back to phpize for local iteration only. ***" >&2
+        exit 1
+    fi
+    echo "   *** PIE did not install the extension; ALLOW_MANUAL_FALLBACK=1 set, falling back to manual phpize+make+install ***"
     cd /tmp/src
     phpize >/dev/null
     ./configure --enable-phonetic >/dev/null
     make -j"$(nproc)" 2>&1 | tail -3
     make install 2>&1 | tail -3
     docker-php-ext-enable phonetic
-    echo "   [fallback] manual install SUCCEEDED"
+    echo "   [fallback] manual install SUCCEEDED (NOTE: PIE path was NOT validated)"
 fi
 php -m | grep -i phonetic
 php -r 'echo "phonetic version: ", phpversion("phonetic"), PHP_EOL;'

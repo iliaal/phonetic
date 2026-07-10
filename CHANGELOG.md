@@ -14,20 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`thumb` → `0M|TM`), GH at word positions 1-2 falls through to Parker's rule
   (`high`/`hugh` → `H`), bare `jose` takes the Spanish-H primary (`HS|HS`), and
   germanic CH covers word-final position (`mooch` → `MK`).
-- `double_metaphone()`: leading and trailing spaces no longer break word-start
-  anchors such as the leading vowel in `Otto` or silent `KN` in `KNIGHT`.
+- `double_metaphone()`: leading and trailing whitespace no longer breaks
+  word-start anchors such as the leading vowel in `Otto` or silent `KN` in
+  `KNIGHT`. Every boundary byte `<= U+0020` is trimmed, matching the reference's
+  `String.trim()`, so `"\tOtto"` and `"\nKNIGHT"` encode like their bare forms.
 - `double_metaphone()`: `-gier` now uses the French soft-G branch wherever it
   appears, not only at a word end, so `brigier` returns the Commons Codec parity
   code `PRJ|PRJR` and `angiera` returns `ANJR|ANJR`.
 - `double_metaphone()`: malformed UTF-8 no longer swallows the letters after a
   stray lead byte; invalid sequences fold byte-wise (Latin-1 fallback), like
   the other encoders.
+- UTF-8 decoding (all encoders) now rejects overlong forms (`C0`/`C1` and
+  overlong 3/4-byte sequences), UTF-16 surrogate code points, and values above
+  U+10FFFF, folding the lead byte to Latin-1 like every other malformed sequence
+  instead of admitting a non-scalar code point.
+- `bmpm()` and `dm_soundex()`: U+1E9E (capital sharp S, `ẞ`) folds to `ß` before
+  the rules run, matching Java's lower-casing, so `STRAẞE` encodes like `Straße`.
 - `bmpm_match()`: token intersection now understands the `(remainder)-(combined)`
   group syntax the prefix branch emits, so `bmpm_match("van Smith", "Smith")`
   is true.
 - `bmpm()` / `bmpm_match()`: a forced `$language` is honoured inside the
   prefix/`d'` split instead of being silently re-detected (deliberate
   divergence from Commons Codec, which re-guesses there).
+- `bmpm()` / `bmpm_match()`: the invalid-`$language` exception now renders a
+  binary-safe, 32-byte-bounded preview (non-printable bytes as `?`) instead of
+  the raw value, so a huge invalid language no longer produces a proportionally
+  huge message and an embedded NUL no longer truncates it.
 - `bmpm()`: leading/trailing control characters are trimmed like the
   reference's `String.trim()` (every code point `<= U+0020`).
 - `dm_soundex_match()`: two inputs that never matched any rule (e.g. two
@@ -49,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The five comparison helpers' parameters are named `$a`/`$b` (as the README
   always documented) — affects named-argument calls only.
+- `composer.json` license is now the SPDX expression `BSD-3-Clause AND
+  Apache-2.0` (the extension code and the vendored rule data both apply);
+  the previous array form incorrectly signalled a choice between the two.
+- The README BMPM token-splitting recipe now splits on `(`, `)`, `|` and `-`
+  (with `PREG_SPLIT_NO_EMPTY`), matching `bmpm_match()`'s tokenizer, so grouped
+  prefix output like `(zmit)-(...)` decomposes without stray parentheses.
 - Performance: bmpm decodes input once per call (was twice), pre-parses rule
   phoneme expressions at module init, and avoids UTF-8 round-trips in the
   prefix recursion; Double Metaphone literal matching no longer calls
@@ -61,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning-clean build as Linux.
 - Generated BMPM table decoding now fails module initialization if a checked-in
   table exceeds the generator's fixed C buffer caps.
+- CI now preflights `extension_loaded("phonetic")` and fails on any
+  skipped/borked/leaked test, so a silent load failure can no longer pass green
+  with the whole suite skipped (every `.phpt` requires the extension). The ASAN
+  lane no longer masks its exit status behind `| tee … || true`.
+- `scripts/pie-smoke.sh` treats a `pie install` failure as fatal by default (the
+  PIE/Packagist path is the thing under test); the manual phpize fallback is
+  opt-in via `ALLOW_MANUAL_FALLBACK=1` for local iteration.
 
 ## [0.2.0] - 2026-06-30
 

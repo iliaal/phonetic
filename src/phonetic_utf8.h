@@ -23,30 +23,40 @@
 #include "php.h"
 
 /* Decode the first code point of s (len >= 1 bytes remaining). Stores the
- * sequence's byte length in *clen. Malformed or truncated sequences decode as
- * a single raw byte: the scan always advances, and bytes 0x80-0xFF fall back
- * to their Latin-1 meaning instead of swallowing the following characters. */
+ * sequence's byte length in *clen. Malformed sequences -- truncated, bare
+ * continuation, overlong (C0/C1 and overlong 3/4-byte forms), UTF-16 surrogate
+ * range, or > U+10FFFF -- decode as a single raw byte: the scan always advances,
+ * and bytes 0x80-0xFF fall back to their Latin-1 meaning instead of swallowing
+ * the following characters or admitting a non-scalar code point. */
 static zend_always_inline uint32_t ph_u8_next(const char *s, size_t len, int *clen)
 {
 	const unsigned char *p = (const unsigned char *) s;
 	unsigned char c = p[0];
+	uint32_t cp;
 
 	if (c < 0x80) {
 		*clen = 1;
 		return c;
 	}
 	if ((c >> 5) == 0x6 && len >= 2 && (p[1] & 0xc0) == 0x80) {
-		*clen = 2;
-		return ((c & 0x1fu) << 6) | (p[1] & 0x3fu);
-	}
-	if ((c >> 4) == 0xe && len >= 3 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
-		*clen = 3;
-		return ((c & 0x0fu) << 12) | ((p[1] & 0x3fu) << 6) | (p[2] & 0x3fu);
-	}
-	if ((c >> 3) == 0x1e && len >= 4 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 &&
+		cp = ((c & 0x1fu) << 6) | (p[1] & 0x3fu);
+		if (cp >= 0x80) {                               /* not C0/C1 overlong */
+			*clen = 2;
+			return cp;
+		}
+	} else if ((c >> 4) == 0xe && len >= 3 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
+		cp = ((c & 0x0fu) << 12) | ((p[1] & 0x3fu) << 6) | (p[2] & 0x3fu);
+		if (cp >= 0x800 && (cp < 0xd800 || cp > 0xdfff)) {   /* not overlong, not surrogate */
+			*clen = 3;
+			return cp;
+		}
+	} else if ((c >> 3) == 0x1e && len >= 4 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 &&
 	    (p[3] & 0xc0) == 0x80) {
-		*clen = 4;
-		return ((c & 0x07u) << 18) | ((p[1] & 0x3fu) << 12) | ((p[2] & 0x3fu) << 6) | (p[3] & 0x3fu);
+		cp = ((c & 0x07u) << 18) | ((p[1] & 0x3fu) << 12) | ((p[2] & 0x3fu) << 6) | (p[3] & 0x3fu);
+		if (cp >= 0x10000 && cp <= 0x10ffff) {          /* not overlong, in range */
+			*clen = 4;
+			return cp;
+		}
 	}
 
 	*clen = 1;
@@ -129,6 +139,7 @@ static inline uint32_t ph_lc_latin(uint32_t c)
 	if (c >= 0xC0 && c <= 0xD6) return c + 0x20;   /* A-grave .. O-diaeresis */
 	if (c >= 0xD8 && c <= 0xDE) return c + 0x20;   /* O-slash .. Thorn */
 	if (c == 0x0130) return 'i';                    /* I with dot above (Turkish) */
+	if (c == 0x1E9E) return 0x00DF;                 /* capital sharp S -> small sharp s (Java lowercase) */
 	if (c >= 0x0100 && c <= 0x0137) return (c & 1u) ? c : c + 1;
 	if (c >= 0x0139 && c <= 0x0148) return (c & 1u) ? c + 1 : c;
 	if (c >= 0x014A && c <= 0x0177) return (c & 1u) ? c : c + 1;

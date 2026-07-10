@@ -1234,8 +1234,21 @@ static int bm_forced_language(int nt, zend_string *language, uint32_t arg_num, l
 	if (language != NULL && ZSTR_LEN(language) > 0) {
 		int idx = bm_lang_index(nt, ZSTR_VAL(language), ZSTR_LEN(language));
 		if (idx < 0) {
+			/* $language is a raw PHP string. Render a bounded, printable preview:
+			 * a %s of the raw value would truncate at an embedded NUL and an
+			 * unbounded one would inflate the message to the input's size. Real
+			 * language names are short ASCII tokens; non-printable bytes map to
+			 * '?' so the preview is binary-safe. */
+			char preview[33];
+			size_t plen = ZSTR_LEN(language) < sizeof(preview) - 1 ? ZSTR_LEN(language) : sizeof(preview) - 1;
+			size_t i;
+			for (i = 0; i < plen; i++) {
+				unsigned char ch = (unsigned char) ZSTR_VAL(language)[i];
+				preview[i] = (ch >= 0x20 && ch < 0x7f) ? (char) ch : '?';
+			}
+			preview[plen] = '\0';
 			zend_argument_value_error(arg_num, "\"%s\" is not a known language for the given name type",
-			                          ZSTR_VAL(language));
+			                          preview);
 			return FAILURE;
 		}
 		*forced = (langset_t) (1u << idx);

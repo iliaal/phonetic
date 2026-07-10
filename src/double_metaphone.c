@@ -162,10 +162,14 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 
 	start = DMET_PREPAD;
 	end = DMET_PREPAD + (int) len - 1;
-	while (start <= end && buf[start] == ' ') {
+	/* The reference cleanInput() runs Java String.trim(), which strips every
+	 * leading/trailing byte <= 0x20 (space, tab, newline, CR, ...), not only
+	 * ASCII space. The folded buffer is pure ASCII so the unsigned compare
+	 * never matches a folded high byte, and the pad sentinel ('-') is > 0x20. */
+	while (start <= end && (unsigned char) buf[start] <= ' ') {
 		start++;
 	}
-	while (end >= start && buf[end] == ' ') {
+	while (end >= start && (unsigned char) buf[end] <= ' ') {
 		end--;
 	}
 	if (start > end) {

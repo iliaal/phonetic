@@ -157,8 +157,10 @@ foreach ($records as $id => $name) {
 }
 $hits = $index[dm_soundex("Moskovitz")[0]] ?? [];
 
-// Splitting a BMPM token string into its individual codes
-$codes = preg_split('/[|-]/', bmpm("Peterson"));
+// Splitting a BMPM token string into its individual codes. Prefixed names emit
+// grouped output with parentheses (e.g. bmpm("van Smith") => "(zmit)-(...)"), so
+// split on '(', ')', '|' and '-' -- the same separators bmpm_match() tokenizes on.
+$codes = preg_split('/[()|-]+/', bmpm("van Smith"), -1, PREG_SPLIT_NO_EMPTY);
 ```
 
 ## Performance
