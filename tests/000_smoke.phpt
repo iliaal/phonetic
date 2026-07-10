@@ -5,7 +5,7 @@ phonetic
 --FILE--
 <?php
 var_dump(extension_loaded('phonetic'));
-var_dump(phpversion('phonetic') === '0.2.0');
+var_dump(phpversion('phonetic') === '0.3.0');
 ?>
 --EXPECT--
 bool(true)

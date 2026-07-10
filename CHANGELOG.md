@@ -7,85 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-09
+
 ### Fixed
 
 - `double_metaphone()`: four rules now follow the published Philips algorithm
-  instead of a port's known deviations — silent B in `-UMB`/`-UMBER`
-  (`thumb` → `0M|TM`), GH at word positions 1-2 falls through to Parker's rule
-  (`high`/`hugh` → `H`), bare `jose` takes the Spanish-H primary (`HS|HS`), and
-  germanic CH covers word-final position (`mooch` → `MK`).
-- `double_metaphone()`: leading and trailing whitespace no longer breaks
-  word-start anchors such as the leading vowel in `Otto` or silent `KN` in
-  `KNIGHT`. Every boundary byte `<= U+0020` is trimmed, matching the reference's
-  `String.trim()`, so `"\tOtto"` and `"\nKNIGHT"` encode like their bare forms.
-- `double_metaphone()`: `-gier` now uses the French soft-G branch wherever it
-  appears, not only at a word end, so `brigier` returns the Commons Codec parity
-  code `PRJ|PRJR` and `angiera` returns `ANJR|ANJR`.
-- `double_metaphone()`: malformed UTF-8 no longer swallows the letters after a
-  stray lead byte; invalid sequences fold byte-wise (Latin-1 fallback), like
-  the other encoders.
-- UTF-8 decoding (all encoders) now rejects overlong forms (`C0`/`C1` and
-  overlong 3/4-byte sequences), UTF-16 surrogate code points, and values above
-  U+10FFFF, folding the lead byte to Latin-1 like every other malformed sequence
-  instead of admitting a non-scalar code point.
-- `bmpm()` and `dm_soundex()`: U+1E9E (capital sharp S, `ẞ`) folds to `ß` before
-  the rules run, matching Java's lower-casing, so `STRAẞE` encodes like `Straße`.
-- `bmpm_match()`: token intersection now understands the `(remainder)-(combined)`
-  group syntax the prefix branch emits, so `bmpm_match("van Smith", "Smith")`
-  is true.
+  (`thumb` `0M|TM`, `high`/`hugh` `H`, `jose` `HS|HS`, `mooch` `MK`).
+- `double_metaphone()`: leading/trailing whitespace (any byte `<= U+0020`) is
+  trimmed, so `"\tOtto"` and `"\nKNIGHT"` keep their word-start anchors.
+- `double_metaphone()`: `-gier` uses the French soft-G branch anywhere, not only
+  word-final, so `brigier` codes `PRJ|PRJR` and `angiera` codes `ANJR|ANJR`.
+- `double_metaphone()`: malformed UTF-8 folds byte-wise instead of swallowing
+  the letters after a stray lead byte.
+- UTF-8 decoding (all encoders): overlong, UTF-16 surrogate, and above-U+10FFFF
+  sequences fold the lead byte to Latin-1 rather than decoding as a code point.
+- `bmpm()` and `dm_soundex()`: U+1E9E (`ẞ`) folds to `ß`, so `STRAẞE` encodes
+  like `Straße`.
+- `bmpm_match()`: token intersection handles the `(remainder)-(combined)` prefix
+  group syntax, so `bmpm_match("van Smith", "Smith")` is true.
 - `bmpm()` / `bmpm_match()`: a forced `$language` is honoured inside the
-  prefix/`d'` split instead of being silently re-detected (deliberate
-  divergence from Commons Codec, which re-guesses there).
-- `bmpm()` / `bmpm_match()`: the invalid-`$language` exception now renders a
-  binary-safe, 32-byte-bounded preview (non-printable bytes as `?`) instead of
-  the raw value, so a huge invalid language no longer produces a proportionally
-  huge message and an embedded NUL no longer truncates it.
-- `bmpm()`: leading/trailing control characters are trimmed like the
-  reference's `String.trim()` (every code point `<= U+0020`).
-- `dm_soundex_match()`: two inputs that never matched any rule (e.g. two
-  all-Cyrillic or all-digit strings) no longer compare as homophones via the
-  padded `"000000"` sentinel.
-- U+0130 (`İ`) now lower-cases to `i` in `bmpm()` and `dm_soundex()` instead of
-  vanishing via a wrong İ→ı case pairing, so `İstanbul` matches `istanbul`.
+  prefix/`d'` split (deliberate divergence from Commons Codec).
+- `bmpm()` / `bmpm_match()`: the invalid-`$language` exception preview is
+  binary-safe (non-printables as `?`) and bounded to 32 bytes.
+- `bmpm()`: leading/trailing control characters (`<= U+0020`) are trimmed.
+- `dm_soundex_match()`: two inputs that match no rule no longer compare equal via
+  the padded `"000000"` sentinel.
+- U+0130 (`İ`) lower-cases to `i` in `bmpm()` and `dm_soundex()`, so `İstanbul`
+  matches `istanbul`.
 
 ### Security
 
 - `match_rating()` and `match_rating_compare()` no longer write past the clean
-  buffer when malformed UTF-8 falls back to bare Latin-1 `0xDF` and expands to
-  `SS`.
-- `bmpm()` and `bmpm_match()` now reject input over 4096 bytes with a
-  `ValueError`, matching the existing Daitch-Mokotoff input cap for untrusted
-  strings.
+  buffer on a bare Latin-1 `0xDF` that expands to `SS`.
+- `bmpm()` and `bmpm_match()` reject input over 4096 bytes with a `ValueError`,
+  matching the Daitch-Mokotoff cap.
 
 ### Changed
 
-- The five comparison helpers' parameters are named `$a`/`$b` (as the README
-  always documented) — affects named-argument calls only.
-- `composer.json` license is now the SPDX expression `BSD-3-Clause AND
-  Apache-2.0` (the extension code and the vendored rule data both apply);
-  the previous array form incorrectly signalled a choice between the two.
-- The README BMPM token-splitting recipe now splits on `(`, `)`, `|` and `-`
-  (with `PREG_SPLIT_NO_EMPTY`), matching `bmpm_match()`'s tokenizer, so grouped
-  prefix output like `(zmit)-(...)` decomposes without stray parentheses.
-- Performance: bmpm decodes input once per call (was twice), pre-parses rule
-  phoneme expressions at module init, and avoids UTF-8 round-trips in the
-  prefix recursion; Double Metaphone literal matching no longer calls
-  `strlen`/`memcmp` through an out-of-line helper; Daitch-Mokotoff reuses its
-  branch-set buffers across positions.
+- The five comparison helpers' parameters are named `$a`/`$b` (affects
+  named-argument calls only).
+- `composer.json` license is the SPDX expression `BSD-3-Clause AND Apache-2.0`
+  (was a disjunctive array).
+- The README BMPM token-splitting recipe splits on `(`, `)`, `|`, `-` with
+  `PREG_SPLIT_NO_EMPTY`, matching `bmpm_match()`'s tokenizer.
+- Performance: `bmpm()` decodes input once and pre-parses rules at init;
+  Double Metaphone, Daitch-Mokotoff, and NYSIIS drop per-call allocations.
 
 ### For contributors
 
-- macOS CI now builds with `--enable-phonetic-dev`, so it enforces the same
-  warning-clean build as Linux.
-- Generated BMPM table decoding now fails module initialization if a checked-in
-  table exceeds the generator's fixed C buffer caps.
-- CI now preflights `extension_loaded("phonetic")` and fails on any
-  skipped/borked/leaked test, so a silent load failure can no longer pass green
-  with the whole suite skipped (every `.phpt` requires the extension). The ASAN
-  lane no longer masks its exit status behind `| tee … || true`.
-- `scripts/pie-smoke.sh` treats a `pie install` failure as fatal by default (the
-  PIE/Packagist path is the thing under test); the manual phpize fallback is
-  opt-in via `ALLOW_MANUAL_FALLBACK=1` for local iteration.
+- macOS CI builds with `--enable-phonetic-dev`, enforcing the same warning-clean
+  build as Linux.
+- Generated BMPM table decoding fails module init if a checked-in table exceeds
+  the C buffer caps.
+- CI preflights `extension_loaded("phonetic")` and fails on any
+  skipped/borked/leaked test, so a silent load failure can't pass green.
+- `scripts/pie-smoke.sh` treats a `pie install` failure as fatal (opt out with
+  `ALLOW_MANUAL_FALLBACK=1`).
 
 ## [0.2.0] - 2026-06-30
 
@@ -154,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/iliaal/phonetic/releases/tag/0.3.0
 [0.2.0]: https://github.com/iliaal/phonetic/releases/tag/0.2.0
 [0.1.0]: https://github.com/iliaal/phonetic/releases/tag/0.1.0
