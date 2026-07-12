@@ -199,7 +199,10 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 - `double_metaphone()` targets ASCII/Latin; non-letter bytes are skipped, matching
   Apache Commons Codec.
 - `nysiis()` and `match_rating()` operate on ASCII letters; `match_rating()`
-  also folds the Latin-1/Latin-Extended accent set the reference handles.
+  also folds the Latin-1/Latin-Extended accent set the reference handles. A
+  non-ASCII letter outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is
+  dropped, a deliberate divergence from Commons Codec, which keeps the raw
+  character in the codex.
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
   input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
   the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.

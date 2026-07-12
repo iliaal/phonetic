@@ -175,6 +175,11 @@ function logical_lines(string $path): array
         }
         $lines[] = $line;
     }
+    if ($in_block) {
+        // A vendor file that opens a /* block comment and never closes it would
+        // otherwise swallow every following rule silently; fail loudly instead.
+        fail("unterminated /* block comment in $path");
+    }
     return $lines;
 }
 

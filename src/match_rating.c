@@ -134,7 +134,10 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 			if (a != 0) {
 				out[n++] = a;        /* table already yields uppercase */
 			}
-			/* unmapped non-ASCII is dropped */
+			/* Unmapped non-ASCII is dropped. Deliberate divergence from Commons
+			 * Codec, which retains the raw character in the codex (e.g. U+1E9E
+			 * ẞ -> "STRẞ", U+0130 İ -> "İİSNBL"); we keep the codex ASCII-only,
+			 * as documented. Pinned in tests/unmapped_latin_extended.phpt. */
 		}
 	}
 
