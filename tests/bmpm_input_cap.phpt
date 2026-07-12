@@ -4,8 +4,9 @@ bmpm(): input length is capped to bound CPU on untrusted input
 phonetic
 --FILE--
 <?php
-// At or below the cap (4096 bytes) is fine.
-var_dump(is_string(bmpm(str_repeat("a", 4096))));
+// At or below the cap (4096 bytes) is fine; pin the exact encoding so a silent
+// truncation or off-by-one at the boundary is caught, not just "a string".
+var_dump(bmpm(str_repeat("a", 4096)));
 
 foreach ([
     fn() => bmpm(str_repeat("a", 4097)),
@@ -20,7 +21,7 @@ foreach ([
 }
 ?>
 --EXPECT--
-bool(true)
+string(7) "D|a|i|o"
 bmpm(): Argument #1 ($string) must not exceed 4096 bytes
 bmpm_match(): Argument #1 ($a) must not exceed 4096 bytes
 bmpm_match(): Argument #2 ($b) must not exceed 4096 bytes

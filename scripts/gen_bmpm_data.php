@@ -549,8 +549,15 @@ $b[] = '';
 $b[] = '#endif /* PHP_BMPM_DATA_H */';
 $b[] = '';
 
-if (file_put_contents($out, implode("\n", $b)) === false) {
-    fail("could not write $out");
+/* Write to a temp file and rename() into place: an interrupted run must never
+ * leave a half-written src/bmpm_data.h that still compiles into stale tables. */
+$tmp = $out . '.tmp';
+if (file_put_contents($tmp, implode("\n", $b)) === false) {
+    fail("could not write $tmp");
+}
+if (!rename($tmp, $out)) {
+    @unlink($tmp);
+    fail("could not rename $tmp to $out");
 }
 
 /* ---------------------------------------------------------------------------

@@ -13,10 +13,14 @@ const BMPM_GENERIC = 0;
 const BMPM_ASHKENAZI = 1;
 /** @var int */
 const BMPM_SEPHARDIC = 2;
+/* Accuracy values are deliberately disjoint from the name-type values above so
+ * a misplaced constant (e.g. bmpm($s, BMPM_APPROX)) is rejected by argument
+ * validation instead of silently running as a name type. Keep in sync with
+ * PH_BMPM_APPROX / PH_BMPM_EXACT in src/bmpm.c. */
 /** @var int */
-const BMPM_APPROX = 1;
+const BMPM_APPROX = 10;
 /** @var int */
-const BMPM_EXACT = 2;
+const BMPM_EXACT = 20;
 
 function double_metaphone(string $string, int $max_length = 4): array {}
 

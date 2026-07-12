@@ -11,7 +11,7 @@ encoders and CPU-exhaustion DoS from pathological input.
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.2.x   | :white_check_mark: |
+| 0.3.x   | :white_check_mark: |
 
 Pre-1.0: the current minor gets security fixes, and the API may still
 move between minors until 1.0.

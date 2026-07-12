@@ -40,6 +40,15 @@
 #define BMPM_MAX_PHONEMES 20
 #define BMPM_MAX_INPUT 4096
 
+/* Public $accuracy constant values (as registered from phonetic.stub.php).
+ * They are deliberately disjoint from the name-type values 0/1/2 so a misplaced
+ * constant is caught by bm_validate_accuracy rather than silently interpreted
+ * as a name type. These map to the internal rule_type enum (BMPM_APPROX /
+ * BMPM_EXACT, from bmpm_data.h) in bm_accuracy_rule_type(); keep both in sync
+ * with the stub. */
+#define PH_BMPM_APPROX 10
+#define PH_BMPM_EXACT  20
+
 /* The GENERIC d'/name-prefix handling recurses (bm_encode_core -> bm_encode_sub
  * -> bm_encode_core), peeling one code point per level. Real names nest at most
  * one or two prefixes; crafted input ("d" followed by thousands of apostrophes)
@@ -1212,11 +1221,18 @@ static int bm_validate_name_type(zend_long name_type, uint32_t arg_num)
 
 static int bm_validate_accuracy(zend_long accuracy, uint32_t arg_num)
 {
-	if (accuracy != BMPM_APPROX && accuracy != BMPM_EXACT) {
+	if (accuracy != PH_BMPM_APPROX && accuracy != PH_BMPM_EXACT) {
 		zend_argument_value_error(arg_num, "must be either BMPM_APPROX or BMPM_EXACT");
 		return FAILURE;
 	}
 	return SUCCESS;
+}
+
+/* Map the validated public $accuracy value to the internal rule_type used to
+ * key the generated rulesets. Callers must have passed bm_validate_accuracy. */
+static zend_always_inline int bm_accuracy_rule_type(zend_long accuracy)
+{
+	return accuracy == PH_BMPM_EXACT ? BMPM_EXACT : BMPM_APPROX;
 }
 
 static int bm_validate_input_len(zend_string *input, uint32_t arg_num)
@@ -1264,7 +1280,7 @@ PHP_FUNCTION(bmpm)
 {
 	zend_string *input;
 	zend_long name_type = BMPM_GEN;
-	zend_long accuracy = BMPM_APPROX;
+	zend_long accuracy = PH_BMPM_APPROX;
 	zend_string *language = NULL;
 	char *result;
 	size_t result_len = 0;
@@ -1285,7 +1301,7 @@ PHP_FUNCTION(bmpm)
 		RETURN_THROWS();
 	}
 
-	result = bm_encode_string((int) name_type, (int) accuracy, forced,
+	result = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced,
 	                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
 
 	RETVAL_STRINGL(result, result_len);
@@ -1339,7 +1355,7 @@ PHP_FUNCTION(bmpm_match)
 {
 	zend_string *a, *b;
 	zend_long name_type = BMPM_GEN;
-	zend_long accuracy = BMPM_APPROX;
+	zend_long accuracy = PH_BMPM_APPROX;
 	zend_string *language = NULL;
 	char *ra, *rb;
 	size_t ral = 0, rbl = 0;
@@ -1363,8 +1379,8 @@ PHP_FUNCTION(bmpm_match)
 		RETURN_THROWS();
 	}
 
-	ra = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
-	rb = bm_encode_string((int) name_type, (int) accuracy, forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
+	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
+	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
 

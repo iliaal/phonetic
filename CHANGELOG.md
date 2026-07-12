@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** `BMPM_APPROX` is now `10` and `BMPM_EXACT` is now `20` (were
+  `1` and `2`). The accuracy values are now disjoint from the name-type values
+  (`BMPM_GENERIC`/`BMPM_ASHKENAZI`/`BMPM_SEPHARDIC` = `0`/`1`/`2`), so a
+  misplaced constant such as `bmpm($name, BMPM_APPROX)` is rejected by argument
+  validation instead of silently running as a name type. Code that uses the
+  constant names is unaffected; only code hard-coding the numeric values `1`/`2`
+  for the `$accuracy` argument needs updating.
+
+### Fixed
+
+- `nysiis()`: corrected a source comment that claimed parity with Commons Codec's
+  `SoundexUtils.clean`; the ASCII-only cleaning is a deliberate, documented
+  restriction.
+- `scripts/gen_bmpm_data.php`: `src/bmpm_data.h` is now written to a temp file and
+  renamed into place, so an interrupted regeneration can't leave a truncated
+  header.
+
 ## [0.3.0] - 2026-07-09
 
 ### Fixed

@@ -14,7 +14,9 @@
  * Reimplementation of the published algorithm; no third-party data. Validated
  * against Apache Commons Codec's Nysiis (strict mode) as parity oracle.
  * Operates on ASCII letters: non-letters and non-ASCII bytes are dropped
- * during cleaning, matching the Soundex-style clean the reference uses. */
+ * during cleaning. This is deliberately stricter than Commons Codec's
+ * SoundexUtils.clean (which keeps any Unicode Character.isLetter); the
+ * ASCII-only contract is documented in the README. */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
