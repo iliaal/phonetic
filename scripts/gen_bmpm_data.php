@@ -549,10 +549,26 @@ $b[] = '';
 $b[] = '#endif /* PHP_BMPM_DATA_H */';
 $b[] = '';
 
+$content = implode("\n", $b);
+
+/* Structural sanity before writing: the section comments are hard-coded, but a
+ * future generator edit that leaves a comment unbalanced (or drops the include
+ * guard) would emit a header that fails to compile in a confusing way. Fail
+ * here with a clear message instead. */
+if (substr_count($content, '/*') !== substr_count($content, '*/')) {
+    fail("generated header has unbalanced /* */ comment delimiters");
+}
+if (!str_contains($content, '#ifndef PHP_BMPM_DATA_H')
+    || !str_contains($content, '#define PHP_BMPM_DATA_H')
+    || substr(rtrim($content), -strlen('#endif /* PHP_BMPM_DATA_H */'))
+       !== '#endif /* PHP_BMPM_DATA_H */') {
+    fail("generated header is missing its include guard");
+}
+
 /* Write to a temp file and rename() into place: an interrupted run must never
  * leave a half-written src/bmpm_data.h that still compiles into stale tables. */
 $tmp = $out . '.tmp';
-if (file_put_contents($tmp, implode("\n", $b)) === false) {
+if (file_put_contents($tmp, $content) === false) {
     fail("could not write $tmp");
 }
 if (!rename($tmp, $out)) {

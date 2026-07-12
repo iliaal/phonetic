@@ -204,6 +204,20 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
   the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.
 
+Input-length policy by function (the cap is per-argument, so both operands of a
+match/compare helper are checked):
+
+| Function(s) | Max input | Over the limit |
+|---|---|---|
+| `bmpm`, `bmpm_match` | 4096 bytes | throws `ValueError` |
+| `dm_soundex`, `dm_soundex_match` | 4096 bytes | throws `ValueError` |
+| `double_metaphone`, `double_metaphone_match` | not capped | encodes (bounded by memory) |
+| `nysiis`, `nysiis_match` | not capped | encodes (bounded by memory) |
+| `match_rating`, `match_rating_compare` | not capped | encodes (bounded by memory) |
+
+The uncapped encoders run in linear time and space, so bound untrusted input at
+the application layer if you feed them arbitrary-length strings.
+
 ## 🔗 Native PHP extensions
 
 Companion native PHP extensions:
