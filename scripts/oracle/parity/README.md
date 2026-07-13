@@ -1,21 +1,21 @@
 # Commons Codec parity fixture
 
-A frozen snapshot of Apache Commons Codec **1.17.1** (the parity oracle) output
-for a curated word list, checked in CI so that a rule-data regeneration, a
-`gen_bmpm_data.php` change, or an encoder edit that silently drifts from Commons
-fails the build instead of shipping.
+The checked-in fixture freezes Apache Commons Codec 1.17.1 output for every
+configured mode and every name in `words.txt`. CI rejects missing, duplicate,
+and unexpected mode/name pairs before comparing encoder output.
 
-- `words.txt` — the input names (ASCII, no recognised BMPM prefixes, so no
-  documented divergences are exercised).
-- `golden.tsv` — `mode<TAB>word<TAB>expected`, one line per agreeing
-  `(word, mode)` pair. Modes: `dm`, `nysiis_strict`, `mra`, `dmsoundex`,
-  `bmpm_gen_approx`. `dmsoundex` and `bmpm_gen_approx` values are normalised to a
-  sorted `|`-joined set (order-independent).
-- `check.php` — runs the extension over `golden.tsv` and exits non-zero on any
-  mismatch. This is what CI runs; it needs **no Java** (the golden is frozen).
+The matrix covers:
 
-The golden is intentionally a *matching* set: every line is a case where the
-extension and Commons agree today, so any CI mismatch is a genuine regression.
+- Double Metaphone at the public default length
+- NYSIIS strict and full modes
+- Match Rating Approach
+- Daitch-Mokotoff Soundex
+- BMPM generic, Ashkenazi, and Sephardic name types in approximate and exact modes
+
+`dmsoundex` and all BMPM results are normalized to sorted `|`-joined sets, so
+the fixture ignores alternative ordering. The word list stays ASCII and avoids
+recognized BMPM prefixes because forced-language prefix behavior deliberately
+diverges from Commons Codec.
 
 ## Run locally
 
@@ -23,18 +23,17 @@ extension and Commons agree today, so any CI mismatch is a genuine regression.
 php -d extension=modules/phonetic.so scripts/oracle/parity/check.php
 ```
 
-## Regenerate after a deliberate change
+The checker needs no Java. It reads the frozen `golden.tsv` and requires the
+complete 11-mode by 50-word matrix.
 
-Only regenerate when a divergence is intended and understood (the golden is a
-frozen oracle, not extension output).
+## Regenerate from the pinned oracle
 
 ```sh
-cd scripts/oracle
-./fetch-codec.sh                                  # SHA-256-pinned jar
-for m in "dm" "nysiis strict" "mra" "dmsoundex" "bmpm gen approx"; do
-    java -cp commons-codec-1.17.1.jar Oracle.java $m < parity/words.txt
-done
+scripts/oracle/fetch-codec.sh
+php scripts/oracle/parity/generate.php
+php -d extension=modules/phonetic.so scripts/oracle/parity/check.php
 ```
 
-Normalise `dmsoundex` / `bmpm gen approx` to a sorted `|`-set (see `check.php`)
-and rebuild `golden.tsv` as `mode<TAB>word<TAB>expected`. Requires Java 11+.
+`generate.php` verifies the jar SHA-256 before invoking `Oracle.java`, checks
+the returned word order and row count for each mode, then atomically replaces
+`golden.tsv`. Regenerate only after an intended and understood parity change.

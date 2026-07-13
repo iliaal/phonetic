@@ -50,7 +50,7 @@ jobs:
   # vendored rule files. Regenerate and fail if the checked-in header is stale,
   # so a vendor-data or generator edit can't ship out-of-sync tables.
   codegen:
-    name: Generated tables are up to date
+    name: Generated files are up to date
     runs-on: ubuntu-latest
     needs: validate
     steps:
@@ -63,10 +63,12 @@ jobs:
         run: php scripts/gen_bmpm_data.php
       - name: Fail if the checked-in header is stale
         run: git diff --exit-code src/bmpm_data.h
+      - name: Verify arginfo matches phonetic.stub.php
+        run: php scripts/check_arginfo.php
 
-  # Compare encoder output against a frozen Apache Commons Codec 1.17.1 golden
-  # (scripts/oracle/parity), so a rule regen or encoder edit that drifts from the
-  # parity oracle fails here. No Java needed: the golden is checked in.
+  # Compare every configured mode/word pair against a frozen Apache Commons
+  # Codec 1.17.1 golden. The checker rejects incomplete or duplicate fixtures,
+  # so deleting rows cannot weaken this gate silently. No Java is needed here.
   parity:
     name: Commons Codec parity
     runs-on: ubuntu-latest

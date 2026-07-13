@@ -54,7 +54,11 @@ double_metaphone("Catherine", 3);          // ['primary' => 'K0R',  'alternate' 
 
 ### Beider-Morse Phonetic Matching
 
-Language-aware token set, joined by `|` (alternatives) and `-` (words). Matches Apache Commons Codec's default `BeiderMorseEncoder`.
+Language-aware token set. `|` separates alternatives. With the default
+concatenation mode, ordinary words form one encoded sequence (`"John Smith"`
+becomes `"ionzmit"`). Recognized generic prefixes use
+`(remainder)-(combined)` groups. Matches Apache Commons Codec's default
+`BeiderMorseEncoder`.
 
 ```php
 bmpm(string $string, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): string
@@ -145,7 +149,7 @@ bmpm_match("Peterson", "Petersen");               // true
 match_rating_compare("Catherine", "Kathryn");     // true
 ```
 
-For indexed lookup, encode once and store the key(s) with each record, then query by encoded value instead of re-encoding at search time. Double Metaphone gives one or two keys per name; Daitch-Mokotoff and BMPM give a set, so index every code. BMPM's token string separates alternatives with `|` and words with `-`:
+For indexed lookup, encode once and store the key(s) with each record, then query by encoded value instead of re-encoding at search time. Double Metaphone gives one or two keys per name; Daitch-Mokotoff and BMPM give a set, so index every code. BMPM separates alternatives with `|`; ordinary words are concatenated, while recognized generic prefixes produce `(remainder)-(combined)` groups:
 
 ```php
 // Build a phonetic index, then look up by shared code
@@ -241,7 +245,9 @@ BSD 3-Clause (see [LICENSE](LICENSE)).
 
 The Beider-Morse and Daitch-Mokotoff rule data is vendored from
 [Apache Commons Codec](https://commons.apache.org/proper/commons-codec/) under
-the Apache License 2.0; its notice is included in Section 2 of the LICENSE file.
+the Apache License 2.0. The complete terms are in `LICENSE-APACHE`; the Commons
+Codec attribution is in `NOTICE`, and Section 2 of `LICENSE` maps the rule data
+to those files.
 Double Metaphone, NYSIIS, and Match Rating Approach are independent
 implementations of their published algorithms, validated against (and
 edge-case-aligned with) Apache Commons Codec as the parity-test oracle

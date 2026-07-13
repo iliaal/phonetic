@@ -8,3 +8,4 @@
 # codegen parses them and parity depends on them), so git never touches
 # the content under any autocrlf mode.
 vendor/commons-codec-bm/*.txt binary
+vendor/commons-codec-bm/bm/** binary

@@ -63,13 +63,40 @@ jobs:
           tools: phpize
           coverage: none
 
-      # Plain dispatch (no tag): prove the source compiles on this OS/arch.
-      - name: Validate build (dispatch without a tag)
-        if: github.event_name == 'workflow_dispatch' && inputs.release_tag == ''
+      # Test this exact checkout before any upload. On a plain dispatch this is
+      # the complete validation path; release/backfill runs package only after it
+      # passes.
+      - name: Build and test tagged source
         run: |
+          set -euo pipefail
           phpize
-          ./configure --enable-phonetic
+          ./configure --enable-phonetic --enable-phonetic-dev
           make -j"$(getconf _NPROCESSORS_ONLN)"
+          export TEST_PHP_EXECUTABLE=$(command -v php)
+          export TEST_PHP_ARGS="-d extension=$(pwd)/modules/phonetic.so"
+          export NO_INTERACTION=1
+          php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load"; exit 1; }
+          RESULT=$(php run-tests.php --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)
+          echo "$RESULT"
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi
+
+      # pie-ext-binary-builder rebuilds in this same workspace without a clean
+      # step, so its make would silently reuse the objects compiled above with
+      # the test configure's flags instead of the packaging configure's. Drop
+      # every build artifact so the shipped binary is compiled from scratch
+      # under exactly the flags the builder requests.
+      - name: Clean test-build artifacts
+        run: git clean -xdf .
 
       # Real build + upload: on a published release, or a dispatch that names
       # an existing release tag to attach assets to.

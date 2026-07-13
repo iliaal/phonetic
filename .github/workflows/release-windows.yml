@@ -7,8 +7,8 @@ name: Release Windows binaries
 # convention. All phonetic rule data is compiled in, so there is no
 # external DLL to bundle.
 #
-# Tests are off in this lane -- the test workflow already validated the
-# same arch/ts/php combinations on master.
+# Each matrix build runs PHPT against the release tag before the upload job can
+# publish its binary.
 
 on:
   release:
@@ -22,6 +22,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - id: matrix
         uses: php/php-windows-builder/extension-matrix@v1
         with:
@@ -36,12 +38,14 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - uses: php/php-windows-builder/extension@v1
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
-          run-tests: 'false'
+          run-tests: 'true'
 
   release:
     name: Upload binaries to the release
@@ -52,7 +56,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - uses: php/php-windows-builder/release@v1
         with:
           release: ${{ github.event.release.tag_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload third-party license and notice
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" LICENSE-APACHE NOTICE --clobber

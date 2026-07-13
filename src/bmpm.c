@@ -1317,38 +1317,72 @@ static zend_always_inline int bmpm_tok_sep(char c)
 	return c == '|' || c == '(' || c == ')' || c == '-';
 }
 
-/* Do the two phoneme sets share a token? Empty sets never match, so two
- * unencodable inputs are not treated as homophones. */
-static zend_bool bmpm_tokens_intersect(const char *a, size_t al, const char *b, size_t bl)
+static uint32_t bmpm_token_count(const char *s, size_t len)
 {
 	size_t i = 0;
+	uint32_t count = 0;
+
+	while (i < len) {
+		size_t j = i;
+		while (j < len && !bmpm_tok_sep(s[j])) {
+			j++;
+		}
+		if (j > i && count < UINT32_MAX) {
+			count++;
+		}
+		i = j + 1;
+	}
+	return count;
+}
+
+/* Do the two phoneme sets share a token? Empty sets never match, so two
+ * unencodable inputs are not treated as homophones. Index the smaller encoded
+ * result once instead of rescanning the other result for every token. */
+static zend_bool bmpm_tokens_intersect(const char *a, size_t al, const char *b, size_t bl)
+{
+	const char *indexed = a, *probed = b;
+	size_t indexed_len = al, probed_len = bl;
+	size_t i = 0;
+	HashTable tokens;
+	zend_bool matched = 0;
 
 	if (al == 0 || bl == 0) {
 		return 0;
 	}
-	while (i < al) {
+	if (indexed_len > probed_len) {
+		indexed = b;
+		indexed_len = bl;
+		probed = a;
+		probed_len = al;
+	}
+
+	zend_hash_init(&tokens, bmpm_token_count(indexed, indexed_len), NULL, NULL, 0);
+	while (i < indexed_len) {
 		size_t j = i;
-		size_t tlen;
-		while (j < al && !bmpm_tok_sep(a[j])) {
+		while (j < indexed_len && !bmpm_tok_sep(indexed[j])) {
 			j++;
 		}
-		tlen = j - i;
-		if (tlen > 0) {
-			size_t p = 0;
-			while (p < bl) {
-				size_t q = p;
-				while (q < bl && !bmpm_tok_sep(b[q])) {
-					q++;
-				}
-				if (q - p == tlen && memcmp(a + i, b + p, tlen) == 0) {
-					return 1;
-				}
-				p = q + 1;
-			}
+		if (j > i) {
+			zend_hash_str_add_empty_element(&tokens, indexed + i, j - i);
 		}
 		i = j + 1;
 	}
-	return 0;
+
+	i = 0;
+	while (i < probed_len) {
+		size_t j = i;
+		while (j < probed_len && !bmpm_tok_sep(probed[j])) {
+			j++;
+		}
+		if (j > i && zend_hash_str_exists(&tokens, probed + i, j - i)) {
+			matched = 1;
+			break;
+		}
+		i = j + 1;
+	}
+
+	zend_hash_destroy(&tokens);
+	return matched;
 }
 
 PHP_FUNCTION(bmpm_match)
