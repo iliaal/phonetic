@@ -14,18 +14,27 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
+concurrency:
+  group: release-windows-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
 jobs:
   matrix:
     name: Resolve Windows release matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
       - id: matrix
-        uses: php/php-windows-builder/extension-matrix@v1
+        uses: php/php-windows-builder/extension-matrix@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
         with:
           php-version-list: '8.1, 8.2, 8.3, 8.4, 8.5'
 
@@ -33,14 +42,17 @@ jobs:
     name: Build ${{ matrix.php-version }} ${{ matrix.ts }} ${{ matrix.arch }}
     needs: matrix
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: php/php-windows-builder/extension@v1
+          persist-credentials: false
+      - uses: php/php-windows-builder/extension@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
@@ -54,16 +66,18 @@ jobs:
     # GITHUB_TOKEN defaults to read-only for `contents:` on newer repos;
     # asset upload needs write or it 403s.
     permissions:
-      contents: write
+      contents: write # Uploads Windows binaries and license files to the release.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: php/php-windows-builder/release@v1
+          persist-credentials: false
+      - uses: php/php-windows-builder/release@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
         with:
           release: ${{ github.event.release.tag_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload third-party license and notice
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" LICENSE-APACHE NOTICE --clobber
+          GITHUB_EVENT_RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+        run: gh release upload "${GITHUB_EVENT_RELEASE_TAG_NAME}" LICENSE-APACHE NOTICE --clobber
