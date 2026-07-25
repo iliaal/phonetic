@@ -255,7 +255,7 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 	char ca[8], cb[8];
 	int n1 = (int) na - 1;
 	int n2 = (int) nb - 1;
-	int i, la = 0, lb = 0, longer, r;
+	int i, la = 0, lb = 0, longer;
 
 	if (na > 6 || nb > 6) {
 		return 0;
@@ -281,9 +281,8 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 	for (i = 0; i < (int) na; i++) if (ca[i] != ' ') la++;
 	for (i = 0; i < (int) nb; i++) if (cb[i] != ' ') lb++;
 	longer = la > lb ? la : lb;
-
-	r = 6 - longer;
-	return r < 0 ? -r : r;
+	/* longer <= 6: both codices already passed getFirst3Last3. */
+	return 6 - longer;
 }
 
 PHP_FUNCTION(match_rating)
@@ -327,23 +326,15 @@ PHP_FUNCTION(match_rating_compare)
 		RETURN_TRUE;
 	}
 
-	na = mra_clean(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
-	nb = mra_clean(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
-	nal = mra_remove_vowels(na, nal);
-	nbl = mra_remove_vowels(nb, nbl);
+	na = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
+	nb = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
 
-	/* The reference dereferences the first character unconditionally here; an
-	 * input that cleans away to nothing has no comparable code. */
+	/* An input that cleans away to nothing has no comparable code. */
 	if (nal == 0 || nbl == 0) {
 		efree(na);
 		efree(nb);
 		RETURN_FALSE;
 	}
-
-	nal = mra_remove_doubles(na, nal);
-	nbl = mra_remove_doubles(nb, nbl);
-	nal = mra_first3last3(na, nal);
-	nbl = mra_first3last3(nb, nbl);
 
 	diff = (int) nal - (int) nbl;
 	if (diff < 0) {

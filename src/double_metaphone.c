@@ -719,65 +719,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 	efree(buf);
 }
 
-PHP_FUNCTION(double_metaphone)
-{
-	zend_string *input;
-	zend_long max_length = 4;
-	smart_str folded = {0};
-	smart_str primary = {0};
-	smart_str secondary = {0};
-	const char *pval = "";
-	const char *sval = "";
-	size_t plen = 0;
-	size_t slen = 0;
-
-	ZEND_PARSE_PARAMETERS_START(1, 2)
-		Z_PARAM_STR(input)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_LONG(max_length)
-	ZEND_PARSE_PARAMETERS_END();
-
-	dmet_fold(ZSTR_VAL(input), ZSTR_LEN(input), &folded);
-	if (folded.s != NULL && ZSTR_LEN(folded.s) > (size_t) DMET_MAX_FOLDED_INPUT) {
-		smart_str_free(&folded);
-		zend_argument_value_error(1, "must not exceed %d bytes after folding", DMET_MAX_FOLDED_INPUT);
-		RETURN_THROWS();
-	}
-
-	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
-		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), &primary, &secondary);
-	}
-
-	if (primary.s != NULL) {
-		smart_str_0(&primary);
-		pval = ZSTR_VAL(primary.s);
-		plen = ZSTR_LEN(primary.s);
-	}
-	if (secondary.s != NULL) {
-		smart_str_0(&secondary);
-		sval = ZSTR_VAL(secondary.s);
-		slen = ZSTR_LEN(secondary.s);
-	}
-
-	/* max_length <= 0 means "no limit": emit the full untruncated codes. */
-	if (max_length > 0) {
-		if (plen > (size_t) max_length) {
-			plen = (size_t) max_length;
-		}
-		if (slen > (size_t) max_length) {
-			slen = (size_t) max_length;
-		}
-	}
-
-	array_init_size(return_value, 2);
-	add_assoc_stringl(return_value, "primary", (char *) pval, plen);
-	add_assoc_stringl(return_value, "alternate", (char *) sval, slen);
-
-	smart_str_free(&folded);
-	smart_str_free(&primary);
-	smart_str_free(&secondary);
-}
-
 /* Fold + encode one string into its untruncated primary/alternate codes. */
 static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *primary, smart_str *secondary)
 {
@@ -800,6 +741,56 @@ static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *p
 	}
 	smart_str_free(&folded);
 	return SUCCESS;
+}
+
+PHP_FUNCTION(double_metaphone)
+{
+	zend_string *input;
+	zend_long max_length = 4;
+	smart_str primary = {0};
+	smart_str secondary = {0};
+	const char *pval = "";
+	const char *sval = "";
+	size_t plen = 0;
+	size_t slen = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 2)
+		Z_PARAM_STR(input)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(max_length)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (dmet_codes(ZSTR_VAL(input), ZSTR_LEN(input), 1, &primary, &secondary) == FAILURE) {
+		smart_str_free(&primary);
+		smart_str_free(&secondary);
+		RETURN_THROWS();
+	}
+
+	if (primary.s != NULL) {
+		pval = ZSTR_VAL(primary.s);
+		plen = ZSTR_LEN(primary.s);
+	}
+	if (secondary.s != NULL) {
+		sval = ZSTR_VAL(secondary.s);
+		slen = ZSTR_LEN(secondary.s);
+	}
+
+	/* max_length <= 0 means "no limit": emit the full untruncated codes. */
+	if (max_length > 0) {
+		if (plen > (size_t) max_length) {
+			plen = (size_t) max_length;
+		}
+		if (slen > (size_t) max_length) {
+			slen = (size_t) max_length;
+		}
+	}
+
+	array_init_size(return_value, 2);
+	add_assoc_stringl(return_value, "primary", (char *) pval, plen);
+	add_assoc_stringl(return_value, "alternate", (char *) sval, slen);
+
+	smart_str_free(&primary);
+	smart_str_free(&secondary);
 }
 
 /* Two non-empty codes of equal (capped) length comparing identical. */

@@ -186,26 +186,20 @@ static int bm_classmember(const uint32_t *cls, int cn, uint32_t c)
 
 static int bm_seqeq(const uint32_t *a, int an, const uint32_t *b, int bn)
 {
-	int i;
 	if (an != bn) return 0;
-	for (i = 0; i < an; i++) if (a[i] != b[i]) return 0;
-	return 1;
+	return an == 0 || memcmp(a, b, (size_t) an * sizeof(uint32_t)) == 0;
 }
 
 static int bm_prefixeq(const uint32_t *seg, int sn, const uint32_t *p, int pn)
 {
-	int i;
 	if (pn > sn) return 0;
-	for (i = 0; i < pn; i++) if (seg[i] != p[i]) return 0;
-	return 1;
+	return pn == 0 || memcmp(seg, p, (size_t) pn * sizeof(uint32_t)) == 0;
 }
 
 static int bm_suffixeq(const uint32_t *seg, int sn, const uint32_t *p, int pn)
 {
-	int i;
 	if (pn > sn) return 0;
-	for (i = 0; i < pn; i++) if (seg[sn - pn + i] != p[i]) return 0;
-	return 1;
+	return pn == 0 || memcmp(seg + sn - pn, p, (size_t) pn * sizeof(uint32_t)) == 0;
 }
 
 static int bm_substr_find(const uint32_t *seg, int sn, const uint32_t *p, int pn)
@@ -213,9 +207,7 @@ static int bm_substr_find(const uint32_t *seg, int sn, const uint32_t *p, int pn
 	int s;
 	if (pn == 0) return 1;
 	for (s = 0; s + pn <= sn; s++) {
-		int k, ok = 1;
-		for (k = 0; k < pn; k++) if (seg[s + k] != p[k]) { ok = 0; break; }
-		if (ok) return 1;
+		if (memcmp(seg + s, p, (size_t) pn * sizeof(uint32_t)) == 0) return 1;
 	}
 	return 0;
 }
@@ -525,6 +517,35 @@ typedef struct {
 	langset_t   langs;
 } alt_t;
 
+/* Fill one alt from a phoneme segment, including an optional trailing
+ * [lang+list] language restriction. */
+static void bm_alt_from_seg(const char *seg, int l, int nt, alt_t *alt)
+{
+	int o = -1, j;
+
+	for (j = 0; j < l; j++) {
+		if (seg[j] == '[') {
+			o = j;
+			break;
+		}
+	}
+	if (o >= 0 && l > 0 && seg[l - 1] == ']') {
+		char lb[64];
+		int cln = l - 1 - (o + 1);
+		if (cln < 0) cln = 0;
+		if (cln > 63) cln = 63;
+		memcpy(lb, seg + o + 1, (size_t) cln);
+		lb[cln] = '\0';
+		alt->t = seg;
+		alt->tn = o;
+		alt->langs = bm_parse_lang_list(nt, lb);
+	} else {
+		alt->t = seg;
+		alt->tn = l;
+		alt->langs = LS_ANY;
+	}
+}
+
 /* Parse one phoneme expression (the rule's 4th column) into alternatives.
  * Mirrors Rule.parsePhonemeExpr / parsePhoneme, including Java's
  * trailing-empty split behaviour and the explicit silent alternative when the
@@ -541,23 +562,7 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 		for (i = 0; i < blen; i++) if (body[i] == '|') { has_bar = 1; break; }
 
 		if (!has_bar) {
-			/* single segment, even if empty */
-			int start = 0, l = blen;
-			const char *seg = body + start;
-			int o = -1, j;
-			for (j = 0; j < l; j++) if (seg[j] == '[') { o = j; break; }
-			if (o >= 0 && l > 0 && seg[l - 1] == ']') {
-				char lb[64];
-				int cln = l - 1 - (o + 1);
-				if (cln < 0) cln = 0;
-				if (cln > 63) cln = 63;
-				memcpy(lb, seg + o + 1, cln); lb[cln] = '\0';
-				alts[na].t = seg; alts[na].tn = o;
-				alts[na].langs = bm_parse_lang_list(nt, lb);
-			} else {
-				alts[na].t = seg; alts[na].tn = l; alts[na].langs = LS_ANY;
-			}
-			na++;
+			bm_alt_from_seg(body, blen, nt, &alts[na++]);
 		} else {
 			/* split on '|', then drop trailing empty segments (Java) */
 			struct { int s, l; } segs[64];
@@ -570,22 +575,7 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 			}
 			while (ns > 0 && segs[ns - 1].l == 0) ns--;
 			for (i = 0; i < ns && na < cap; i++) {
-				const char *seg = body + segs[i].s;
-				int l = segs[i].l;
-				int o = -1, j;
-				for (j = 0; j < l; j++) if (seg[j] == '[') { o = j; break; }
-				if (o >= 0 && l > 0 && seg[l - 1] == ']') {
-					char lb[64];
-					int cln = l - 1 - (o + 1);
-					if (cln < 0) cln = 0;
-					if (cln > 63) cln = 63;
-					memcpy(lb, seg + o + 1, cln); lb[cln] = '\0';
-					alts[na].t = seg; alts[na].tn = o;
-					alts[na].langs = bm_parse_lang_list(nt, lb);
-				} else {
-					alts[na].t = seg; alts[na].tn = l; alts[na].langs = LS_ANY;
-				}
-				na++;
+				bm_alt_from_seg(body + segs[i].s, segs[i].l, nt, &alts[na++]);
 			}
 		}
 
@@ -594,20 +584,7 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 			na++;
 		}
 	} else {
-		int l = (int) len, o = -1, j;
-		for (j = 0; j < l; j++) if (raw[j] == '[') { o = j; break; }
-		if (o >= 0 && l > 0 && raw[l - 1] == ']') {
-			char lb[64];
-			int cln = l - 1 - (o + 1);
-			if (cln < 0) cln = 0;
-			if (cln > 63) cln = 63;
-			memcpy(lb, raw + o + 1, cln); lb[cln] = '\0';
-			alts[na].t = raw; alts[na].tn = o;
-			alts[na].langs = bm_parse_lang_list(nt, lb);
-		} else {
-			alts[na].t = raw; alts[na].tn = l; alts[na].langs = LS_ANY;
-		}
-		na++;
+		bm_alt_from_seg(raw, (int) len, nt, &alts[na++]);
 	}
 	return na;
 }
@@ -1052,45 +1029,44 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 		if (tn >= 2 && tcp[0] == 'd' && tcp[1] == 0x27) {
 			size_t rr, cr;
 			uint32_t *cbuf = safe_emalloc(tn, sizeof(uint32_t), 0);
-			char *renc, *cenc;
+			char *renc, *cenc, *out;
 			cbuf[0] = 'd';
 			memcpy(cbuf + 1, tcp + 2, (size_t) (tn - 2) * sizeof(uint32_t));
 			renc = bm_encode_sub(nt, rt, forced, tcp + 2, tn - 2, &rr, depth + 1);
 			cenc = bm_encode_sub(nt, rt, forced, cbuf, tn - 1, &cr, depth + 1);
 			efree(cbuf);
-			{
-				char *out = bm_pair_string(renc, rr, cenc, cr, outlen);
-				efree(renc); efree(cenc);
-				return out;
-			}
+			out = bm_pair_string(renc, rr, cenc, cr, outlen);
+			efree(renc);
+			efree(cenc);
+			return out;
 		}
 		{
 			int pi;
 			for (pi = 0; pi < gen_prefix_count; pi++) {
 				const char *l = gen_prefix_order[pi];
 				int ll = (int) strlen(l);
-				int k, ok = 1;
-				if (tn < ll + 1) continue;
+				int k;
+				size_t rr, cr;
+				int remn;
+				uint32_t *cbuf;
+				char *renc, *cenc, *out;
+
+				if (tn < ll + 1 || !bm_cp_eq_ascii(tcp, ll, l) || tcp[ll] != ' ') {
+					continue;
+				}
+				remn = tn - (ll + 1);
+				cbuf = safe_emalloc((size_t) (ll + remn), sizeof(uint32_t), 0);
 				for (k = 0; k < ll; k++) {
-					if (tcp[k] != (uint32_t) (unsigned char) l[k]) { ok = 0; break; }
+					cbuf[k] = (uint32_t) (unsigned char) l[k];
 				}
-				if (!ok || tcp[ll] != ' ') continue;
-				{
-					size_t rr, cr;
-					int remn = tn - (ll + 1);
-					uint32_t *cbuf = safe_emalloc((size_t) (ll + remn), sizeof(uint32_t), 0);
-					char *renc, *cenc;
-					for (k = 0; k < ll; k++) cbuf[k] = (uint32_t) (unsigned char) l[k];
-					memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
-					renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1);
-					cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1);
-					efree(cbuf);
-					{
-						char *out = bm_pair_string(renc, rr, cenc, cr, outlen);
-						efree(renc); efree(cenc);
-						return out;
-					}
-				}
+				memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
+				renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1);
+				cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1);
+				efree(cbuf);
+				out = bm_pair_string(renc, rr, cenc, cr, outlen);
+				efree(renc);
+				efree(cenc);
+				return out;
 			}
 		}
 	}

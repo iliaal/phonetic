@@ -481,58 +481,11 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 			br->code[br->len++] = '0';
 		}
 		br->code[DMS_MAX] = '\0';
-		if (dms_set_find(out, br->code) < 0) {
-			dms_set_push(out, br);
-		}
+		dms_set_push_dedup(out, br);
 	}
 	dms_set_free(&setA);
 	dms_set_free(&setB);
 	return coded;
-}
-
-/* ---------------------------------------------------------------------- */
-/* PHP function                                                           */
-/* ---------------------------------------------------------------------- */
-
-PHP_FUNCTION(dm_soundex)
-{
-	zend_string *input;
-	smart_str cleaned = {0};
-	dms_set out;
-	const char *buf;
-	size_t buflen;
-	int i;
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_STR(input)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (ZSTR_LEN(input) > DMS_MAX_INPUT) {
-		zend_argument_value_error(1, "must not exceed %d bytes", DMS_MAX_INPUT);
-		RETURN_THROWS();
-	}
-
-	/* Empty input maps to an empty list (API contract); any non-empty input
-	 * runs the engine, matching the oracle even when nothing codes. */
-	if (ZSTR_LEN(input) == 0) {
-		array_init(return_value);
-		return;
-	}
-
-	dms_cleanup(ZSTR_VAL(input), ZSTR_LEN(input), &cleaned);
-	smart_str_0(&cleaned);
-	buf = cleaned.s ? ZSTR_VAL(cleaned.s) : "";
-	buflen = cleaned.s ? ZSTR_LEN(cleaned.s) : 0;
-
-	dms_set_init(&out);
-	dms_encode(buf, buflen, &out);
-	array_init_size(return_value, (uint32_t) out.n);
-	for (i = 0; i < out.n; i++) {
-		add_next_index_stringl(return_value, out.b[i].code, DMS_MAX);
-	}
-
-	dms_set_free(&out);
-	smart_str_free(&cleaned);
 }
 
 /* Encode `input` into its Daitch-Mokotoff code set. Returns 1 when the input
@@ -554,11 +507,45 @@ static int dms_codes(zend_string *input, dms_set *out)
 	return coded;
 }
 
+/* ---------------------------------------------------------------------- */
+/* PHP function                                                           */
+/* ---------------------------------------------------------------------- */
+
+PHP_FUNCTION(dm_soundex)
+{
+	zend_string *input;
+	dms_set out;
+	int i;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(input)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (ZSTR_LEN(input) > DMS_MAX_INPUT) {
+		zend_argument_value_error(1, "must not exceed %d bytes", DMS_MAX_INPUT);
+		RETURN_THROWS();
+	}
+
+	/* Empty input maps to an empty list (API contract); any non-empty input
+	 * runs the engine, matching the oracle even when nothing codes. */
+	if (ZSTR_LEN(input) == 0) {
+		array_init(return_value);
+		return;
+	}
+
+	dms_codes(input, &out);
+	array_init_size(return_value, (uint32_t) out.n);
+	for (i = 0; i < out.n; i++) {
+		add_next_index_stringl(return_value, out.b[i].code, DMS_MAX);
+	}
+	dms_set_free(&out);
+}
+
 PHP_FUNCTION(dm_soundex_match)
 {
 	zend_string *a, *b;
 	dms_set sa, sb;
-	int i;
+	int i, ca, cb;
 	zend_bool matched = 0;
 
 	ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -579,16 +566,14 @@ PHP_FUNCTION(dm_soundex_match)
 	 * sentinel from the encoder (oracle parity for dm_soundex()); requiring
 	 * both sides to have actually coded keeps two unencodable inputs from
 	 * comparing as homophones, consistent with the other *_match helpers. */
-	{
-		int ca = dms_codes(a, &sa);
-		int cb = dms_codes(b, &sb);
+	ca = dms_codes(a, &sa);
+	cb = dms_codes(b, &sb);
 
-		if (ca && cb) {
-			for (i = 0; i < sa.n; i++) {
-				if (dms_set_find(&sb, sa.b[i].code) >= 0) {
-					matched = 1;
-					break;
-				}
+	if (ca && cb) {
+		for (i = 0; i < sa.n; i++) {
+			if (dms_set_find(&sb, sa.b[i].code) >= 0) {
+				matched = 1;
+				break;
 			}
 		}
 	}
