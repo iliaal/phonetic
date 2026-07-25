@@ -349,51 +349,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      # run-tests.php exits 0 when every test is SKIPPED (extension load
+      # failure). Linux/macOS jobs fail-closed on that; Windows depends on
+      # php-windows-builder's SDK toolchain (setup-php has no phpize here).
       - uses: php/php-windows-builder/extension@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           run-tests: 'true'
-
-  # php-windows-builder treats all-SKIP as success (run-tests.php exit 0). This
-  # companion job builds with setup-php on Windows and fails closed on load
-  # failure or a non-effective suite, matching the Linux/macOS gate.
-  windows-load-gate:
-    name: Windows load gate (PHP 8.4 NTS)
-    runs-on: windows-latest
-    needs: validate
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - name: Setup PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # master
-        with:
-          php-version: '8.4'
-          tools: phpize, php-config
-          coverage: none
-      - name: Build and test with skip/load gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          phpize
-          ./configure --enable-phonetic --enable-phonetic-dev
-          make -j"$(nproc 2>/dev/null || echo 2)"
-          export TEST_PHP_EXECUTABLE=$(command -v php)
-          export TEST_PHP_ARGS="-d extension=$(pwd)/modules/phonetic.so"
-          export NO_INTERACTION=1
-          php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
-            || { echo "::error::phonetic extension failed to load on Windows"; exit 1; }
-          RESULT=$(php run-tests.php --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)
-          echo "$RESULT"
-          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
-          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
-          BORKED=$(num borked); LEAKED=$(num leaked)
-          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
-          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
-            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
-          fi
-          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
-            echo "::error::Windows suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
-          fi
