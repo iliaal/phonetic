@@ -50,12 +50,32 @@ jobs:
           sudo apt-get install -y --no-install-recommends bison libtool-bin
       - name: Download PIE
         run: |
-          curl -fsSL -o /tmp/pie.phar https://github.com/php/pie/releases/latest/download/pie.phar
+          # Pin a release tag so CI is not a moving target (latest.phar can
+          # change under our feet). Bump intentionally when upgrading PIE.
+          curl -fsSL -o /tmp/pie.phar \
+            https://github.com/php/pie/releases/download/1.4.9/pie.phar
           chmod +x /tmp/pie.phar
+          php /tmp/pie.phar --version
       - name: PIE build smoke
         run: |
           php /tmp/pie.phar repository:add path .
           php /tmp/pie.phar build iliaal/phonetic:*@dev --enable-phonetic
+      - name: Functional smoke (load + encode + match)
+        run: |
+          # pie build validates the package metadata path; still exercise the
+          # actual .so via a classic phpize build so a load/API regression fails
+          # this job even if pie only compiled.
+          set -euo pipefail
+          phpize
+          ./configure --enable-phonetic
+          make -j"$(nproc)"
+          php -d extension="$(pwd)/modules/phonetic.so" -r '
+            if (!extension_loaded("phonetic")) { fwrite(STDERR, "load failed\n"); exit(1); }
+            $dm = double_metaphone("Smith");
+            if (($dm["primary"] ?? "") !== "SM0") { fwrite(STDERR, "dm mismatch\n"); exit(1); }
+            if (!bmpm_match("Jackson", "Jaxon")) { fwrite(STDERR, "bmpm_match failed\n"); exit(1); }
+            echo "pie functional smoke ok\n";
+          '
 
   # The BMPM / Daitch-Mokotoff C tables (src/bmpm_data.h) are generated from the
   # vendored rule files. Regenerate and fail if the checked-in header is stale,
@@ -164,7 +184,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4']
+        # Full supported range (matches Linux). ZTS remains Windows-only.
+        php: ['8.1', '8.2', '8.3', '8.4', '8.5']
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -334,3 +355,45 @@ jobs:
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           run-tests: 'true'
+
+  # php-windows-builder treats all-SKIP as success (run-tests.php exit 0). This
+  # companion job builds with setup-php on Windows and fails closed on load
+  # failure or a non-effective suite, matching the Linux/macOS gate.
+  windows-load-gate:
+    name: Windows load gate (PHP 8.4 NTS)
+    runs-on: windows-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # master
+        with:
+          php-version: '8.4'
+          tools: phpize, php-config
+          coverage: none
+      - name: Build and test with skip/load gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          phpize
+          ./configure --enable-phonetic --enable-phonetic-dev
+          make -j"$(nproc 2>/dev/null || echo 2)"
+          export TEST_PHP_EXECUTABLE=$(command -v php)
+          export TEST_PHP_ARGS="-d extension=$(pwd)/modules/phonetic.so"
+          export NO_INTERACTION=1
+          php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load on Windows"; exit 1; }
+          RESULT=$(php run-tests.php --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)
+          echo "$RESULT"
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::Windows suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi

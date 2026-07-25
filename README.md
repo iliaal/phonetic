@@ -67,7 +67,21 @@ bmpm("Jackson");                           // "iakson|iaksun|...|zokson"
 bmpm("Garcia", BMPM_SEPHARDIC, BMPM_EXACT);// "garsia|gartSa"
 ```
 
-Empty `$language` auto-detects; pass a language name (e.g. `"russian"`) to force it. Constants: `BMPM_GENERIC`, `BMPM_ASHKENAZI`, `BMPM_SEPHARDIC`, `BMPM_APPROX`, `BMPM_EXACT`.
+Empty `$language` auto-detects; pass a language name (e.g. `"russian"`) to force it.
+
+Constants (numeric values):
+
+| Constant | Value | Role |
+|---|---|---|
+| `BMPM_GENERIC` | 0 | name type |
+| `BMPM_ASHKENAZI` | 1 | name type |
+| `BMPM_SEPHARDIC` | 2 | name type |
+| `BMPM_APPROX` | 10 | accuracy |
+| `BMPM_EXACT` | 20 | accuracy |
+
+Accuracy values are deliberately disjoint from name-type values so a misplaced constant such as `bmpm($s, BMPM_APPROX)` is rejected instead of silently selecting a name type. Prefer the constant names over hard-coded integers.
+
+Invalid `$name_type`, `$accuracy`, or unknown `$language` for the name type raise `ValueError`. Inputs longer than 4096 bytes also raise `ValueError` (security bound shared with `bmpm_match()`).
 
 A forced language also applies to the split variants of prefixed names (`van Smith`, `d'Angelo`). Commons Codec re-detects the language inside its prefix branch, silently ignoring the forced set there; this extension deliberately diverges and keeps it forced.
 
@@ -80,7 +94,10 @@ dm_soundex(string $string): array
 
 dm_soundex("Auerbach");                    // ['097400', '097500']
 dm_soundex("Peters");                      // ['734000', '739400']
+dm_soundex("");                            // []  (API: empty list, not ["000000"])
 ```
+
+Empty string is the one encode-level departure from Commons Codec: this API returns `[]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle.
 
 ### NYSIIS
 
@@ -121,11 +138,13 @@ double_metaphone_match(string $a, string $b, int $max_length = 4): int
 double_metaphone_match("Catherine", "Kathryn");          // 2
 double_metaphone_match("Vagner", "Wagner");              // 1
 
-// BMPM: true when the phoneme token sets intersect (same args as bmpm())
+// BMPM: true when the phoneme token sets intersect (same args/validation as bmpm())
 bmpm_match(string $a, string $b, int $name_type = BMPM_GENERIC, int $accuracy = BMPM_APPROX, string $language = ""): bool
 bmpm_match("Moskowitz", "Moskovitz");                    // true
+bmpm_match("Peterson", "Petersen", BMPM_GENERIC, BMPM_APPROX); // true
+bmpm_match("Peterson", "Petersen", BMPM_GENERIC, BMPM_EXACT);  // false
 
-// Daitch-Mokotoff: true when the code sets intersect
+// Daitch-Mokotoff: true when the code sets intersect among *actually coded* inputs
 dm_soundex_match(string $a, string $b): bool
 dm_soundex_match("Moskowitz", "Moskovitz");              // true
 
@@ -137,6 +156,12 @@ nysiis_match("Smith", "Schmit");                         // true (both SNAT)
 match_rating_compare(string $a, string $b): bool
 match_rating_compare("Catherine", "Kathryn");            // true
 ```
+
+**Empty / unencodable never match.** Across all helpers, an empty encoding or an input that produces no usable code is not a homophone of anything (including another empty/unencodable input):
+
+- empty string, whitespace-only, or cleaned-away punctuation → `false` / `0`
+- `dm_soundex_match` also ignores the padded `"000000"` sentinel the encoder emits for non-empty unencodable input; both sides must have actually matched a rule
+- `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec; trivial single-character and cleaned-empty inputs still return `false`
 
 ## Usage
 
@@ -202,11 +227,12 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   case map), so pass Greek names already lowercased or romanized.
 - `double_metaphone()` targets ASCII/Latin; non-letter bytes are skipped, matching
   Apache Commons Codec.
-- `nysiis()` and `match_rating()` operate on ASCII letters; `match_rating()`
-  also folds the Latin-1/Latin-Extended accent set the reference handles. A
-  non-ASCII letter outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is
-  dropped, a deliberate divergence from Commons Codec, which keeps the raw
-  character in the codex.
+- `nysiis()` matches Commons Codec on ASCII surnames; cleaning is deliberately
+  ASCII-only (stricter than Commons `SoundexUtils.clean`, which keeps any
+  Unicode letter). `match_rating()` operates on ASCII letters and folds the
+  Latin-1/Latin-Extended accent set the reference handles. A non-ASCII letter
+  outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is dropped, a deliberate
+  divergence from Commons Codec, which keeps the raw character in the codex.
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
   input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
   the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.

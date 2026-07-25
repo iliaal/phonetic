@@ -455,25 +455,32 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 						pc = "J";
 						sc = "H";
 					}
+					/* Commons handleJ advances by 1 on the JOSE/SAN arm only;
+					 * the double-J skip applies to the remaining branches. */
+					adv = 1;
 				} else if (pos == start && !SAT(pos, "JOSE")) {
 					pc = "J";
 					sc = "A";
+					adv = (B(pos + 1) == 'J') ? 2 : 1;
 				} else if (dmet_is_vowel(B(pos - 1)) && !slavo
 						&& (B(pos + 1) == 'A' || B(pos + 1) == 'O')) {
 					pc = "J";
 					sc = "H";
+					adv = (B(pos + 1) == 'J') ? 2 : 1;
 				} else if (pos == end) {
 					pc = "J";
 					sc = " ";
+					adv = (B(pos + 1) == 'J') ? 2 : 1;
 				} else if (!(B(pos + 1) == 'L' || B(pos + 1) == 'T' || B(pos + 1) == 'K'
 							|| B(pos + 1) == 'S' || B(pos + 1) == 'N' || B(pos + 1) == 'M'
 							|| B(pos + 1) == 'B' || B(pos + 1) == 'Z')
 						&& !(B(pos - 1) == 'S' || B(pos - 1) == 'K' || B(pos - 1) == 'L')) {
 					pc = sc = "J";
+					adv = (B(pos + 1) == 'J') ? 2 : 1;
 				} else {
 					pc = sc = NULL;
+					adv = (B(pos + 1) == 'J') ? 2 : 1;
 				}
-				adv = (B(pos + 1) == 'J') ? 2 : 1;
 				break;
 
 			case 'K':

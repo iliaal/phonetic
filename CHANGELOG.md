@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bmpm()`: lowered `BMPM_MAX_PREFIX_DEPTH` from 16 to 6 (still above realistic
+  name nesting; bounds exponential prefix dual-encode fan-out under the 4096-byte
+  input cap).
+- Internal BMPM rule-type enum tokens renamed to `BMPM_RT_APPROX` /
+  `BMPM_RT_EXACT` so they cannot collide with public accuracy constants.
+  Generated stack caps (`BMPM_CAP_*`) are shared between the generator and
+  `src/bmpm.c`.
+
+### Fixed
+
+- `double_metaphone()`: JOSE/SAN `J` branch no longer applies the double-J
+  advance (Commons Codec `handleJ` advances by 1 on that arm only).
+- `dm_soundex()`: treat U+0085 (NEXT LINE) as whitespace, matching Java
+  `Character.isWhitespace`.
+- `bmpm()` MINIT: zero-initialize ruleset/language indexes so a mid-build abort
+  cannot free garbage pointers on unload.
+- `bmpm()`: overflow-safe allocation for phoneme-set growth and prefix pair
+  buffers; final-rule merge uses a hash map + one sort instead of O(R²)
+  insert-sort (same comparator order).
+- Docs/tests: empty/unencodable match contracts, BMPM validation and accuracy
+  values, `bmpm_match` accuracy forwarding, and word-final `J` alternate space.
+
+## [0.4.0] - 2026-07-25
+
+### Changed
+
 - **BREAKING:** `BMPM_APPROX` is now `10` and `BMPM_EXACT` is now `20` (were
   `1` and `2`). The accuracy values are now disjoint from the name-type values
   (`BMPM_GENERIC`/`BMPM_ASHKENAZI`/`BMPM_SEPHARDIC` = `0`/`1`/`2`), so a
@@ -16,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation instead of silently running as a name type. Code that uses the
   constant names is unaffected; only code hard-coding the numeric values `1`/`2`
   for the `$accuracy` argument needs updating.
+- Version string is `0.4.0`.
 
 ### Fixed
 
@@ -150,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/iliaal/phonetic/releases/tag/0.4.0
 [0.3.0]: https://github.com/iliaal/phonetic/releases/tag/0.3.0
 [0.2.0]: https://github.com/iliaal/phonetic/releases/tag/0.2.0
 [0.1.0]: https://github.com/iliaal/phonetic/releases/tag/0.1.0

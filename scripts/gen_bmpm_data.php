@@ -392,7 +392,10 @@ $b[] = ' *                      hold "|"-separated branch alternatives, kept raw
 $b[] = ' *   dm_folding       : one accent/ligature folding (from -> to), raw UTF-8.';
 $b[] = ' *';
 $b[] = ' * name_type values : BMPM_GEN ("gen"), BMPM_ASH ("ash"), BMPM_SEP ("sep").';
-$b[] = ' * rule_type values : BMPM_RULES ("rules"), BMPM_APPROX ("approx"), BMPM_EXACT ("exact").';
+$b[] = ' * rule_type values : BMPM_RULES ("rules"), BMPM_RT_APPROX ("approx"), BMPM_RT_EXACT ("exact").';
+$b[] = ' *   (BMPM_RT_* avoids colliding with the public accuracy constants BMPM_APPROX=10';
+$b[] = ' *    and BMPM_EXACT=20 registered from phonetic.stub.php.)';
+$b[] = ' * Stack/buffer caps below are the single source of truth shared with src/bmpm.c.';
 $b[] = ' */';
 $b[] = '';
 $b[] = '#ifndef PHP_BMPM_DATA_H';
@@ -400,8 +403,15 @@ $b[] = '#define PHP_BMPM_DATA_H';
 $b[] = '';
 $b[] = '#include <stddef.h>';
 $b[] = '';
+$b[] = '#define BMPM_CAP_PATTERN_CPS  ' . CAP_BM_PATTERN_CPS;
+$b[] = '#define BMPM_CAP_CONTEXT_CPS  ' . CAP_BM_CONTEXT_CPS;
+$b[] = '#define BMPM_CAP_PHONEME_ALTS ' . CAP_BM_PHONEME_ALTS;
+$b[] = '#define BMPM_CAP_LANG_BRACKET ' . CAP_BM_LANG_BRACKET;
+$b[] = '#define BMPM_CAP_GUESS_CPS    ' . CAP_BM_GUESS_CPS;
+$b[] = '#define BMPM_CAP_LANGUAGES    ' . CAP_BM_LANGUAGES;
+$b[] = '';
 $b[] = 'enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };';
-$b[] = 'enum bmpm_rule_type { BMPM_RULES = 0, BMPM_APPROX = 1, BMPM_EXACT = 2 };';
+$b[] = 'enum bmpm_rule_type { BMPM_RULES = 0, BMPM_RT_APPROX = 1, BMPM_RT_EXACT = 2 };';
 $b[] = '';
 $b[] = 'typedef struct {';
 $b[] = '    const char *pattern;';
@@ -451,7 +461,7 @@ $b[] = '} dm_folding;';
 $b[] = '';
 
 $nt_enum = ['gen' => 'BMPM_GEN', 'ash' => 'BMPM_ASH', 'sep' => 'BMPM_SEP'];
-$rt_enum = ['rules' => 'BMPM_RULES', 'approx' => 'BMPM_APPROX', 'exact' => 'BMPM_EXACT'];
+$rt_enum = ['rules' => 'BMPM_RULES', 'approx' => 'BMPM_RT_APPROX', 'exact' => 'BMPM_RT_EXACT'];
 
 /* Per-ruleset rule arrays. */
 $b[] = '/* ---- Beider-Morse rule arrays (one per resource, #includes spliced) ---- */';

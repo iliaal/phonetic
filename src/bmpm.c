@@ -25,6 +25,7 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _MSC_VER
@@ -43,18 +44,19 @@
 /* Public $accuracy constant values (as registered from phonetic.stub.php).
  * They are deliberately disjoint from the name-type values 0/1/2 so a misplaced
  * constant is caught by bm_validate_accuracy rather than silently interpreted
- * as a name type. These map to the internal rule_type enum (BMPM_APPROX /
- * BMPM_EXACT, from bmpm_data.h) in bm_accuracy_rule_type(); keep both in sync
- * with the stub. */
+ * as a name type. These map to the internal rule_type enum (BMPM_RT_APPROX /
+ * BMPM_RT_EXACT, from bmpm_data.h) in bm_accuracy_rule_type(); keep both in
+ * sync with the stub. */
 #define PH_BMPM_APPROX 10
 #define PH_BMPM_EXACT  20
 
 /* The GENERIC d'/name-prefix handling recurses (bm_encode_core -> bm_encode_sub
- * -> bm_encode_core), peeling one code point per level. Real names nest at most
- * one or two prefixes; crafted input ("d" followed by thousands of apostrophes)
- * would otherwise drive O(input-length) native recursion and smash the C stack.
- * Past this depth, stop treating a leading prefix specially and encode inline. */
-#define BMPM_MAX_PREFIX_DEPTH 16
+ * -> bm_encode_core), peeling one prefix per level and dual-encoding
+ * (remainder)+(combined). Real names nest at most one or two prefixes; crafted
+ * input would otherwise drive exponential work (binary tree of encodes) and/or
+ * C-stack smash. Past this depth, encode the remainder inline without branching.
+ * Six levels is well above realistic names while bounding fan-out (2^6 leaves). */
+#define BMPM_MAX_PREFIX_DEPTH 6
 
 typedef uint32_t langset_t;
 #define LS_NONE 0u
@@ -306,9 +308,9 @@ static int bm_atoms_find(int as, int ae, const atom_t *atoms, int na, const uint
  * cases; the language-guessing patterns use the pre-parsed form. */
 static int bm_regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
 {
-	atom_t atoms[64];
+	atom_t atoms[BMPM_CAP_CONTEXT_CPS];
 	int as, ae;
-	int na = bm_parse_regex(R, Rn, atoms, 64, &as, &ae);
+	int na = bm_parse_regex(R, Rn, atoms, BMPM_CAP_CONTEXT_CPS, &as, &ae);
 	return bm_atoms_find(as, ae, atoms, na, seg, sn);
 }
 
@@ -327,8 +329,8 @@ static int bm_decode_buf_or_fail(const char *s, uint32_t *buf, int cap, const ch
  * paid once at module load instead of on every candidate rule. */
 static uint32_t *bm_build_ctx_R(const char *raw, int side, int *Rn_out)
 {
-	uint32_t rb[64];
-	int rn = bm_decode_buf_or_fail(raw, rb, 64, "rule context");
+	uint32_t rb[BMPM_CAP_CONTEXT_CPS];
+	int rn = bm_decode_buf_or_fail(raw, rb, BMPM_CAP_CONTEXT_CPS, "rule context");
 	int Rn = 0, i;
 	uint32_t *R = pemalloc((size_t) (rn + 1) * sizeof(uint32_t), 1);
 
@@ -423,8 +425,15 @@ static void pb_reserve(pbuilder *pb, size_t need)
 {
 	if (need > pb->cap) {
 		size_t nc = pb->cap ? pb->cap * 2 : 8;
-		if (nc < need) nc = need;
-		pb->a = erealloc(pb->a, nc * sizeof(phon_t));
+		if (nc < need) {
+			nc = need;
+		}
+		/* Overflow-safe growth: refuse wrap so need * sizeof(phon_t) cannot
+		 * under-allocate and later overrun through pb_push. */
+		if (nc > SIZE_MAX / sizeof(phon_t)) {
+			php_error_docref(NULL, E_ERROR, "phonetic: BMPM phoneme set exceeds allocation limit");
+		}
+		pb->a = safe_erealloc(pb->a, nc, sizeof(phon_t), 0);
 		pb->cap = nc;
 	}
 }
@@ -530,10 +539,10 @@ static void bm_alt_from_seg(const char *seg, int l, int nt, alt_t *alt)
 		}
 	}
 	if (o >= 0 && l > 0 && seg[l - 1] == ']') {
-		char lb[64];
+		char lb[BMPM_CAP_LANG_BRACKET + 1];
 		int cln = l - 1 - (o + 1);
 		if (cln < 0) cln = 0;
-		if (cln > 63) cln = 63;
+		if (cln > BMPM_CAP_LANG_BRACKET) cln = BMPM_CAP_LANG_BRACKET;
 		memcpy(lb, seg + o + 1, (size_t) cln);
 		lb[cln] = '\0';
 		alt->t = seg;
@@ -554,6 +563,8 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 {
 	size_t len = strlen(raw);
 	int na = 0;
+	/* Array room includes the optional trailing silent alternative. */
+	const int seg_cap = BMPM_CAP_PHONEME_ALTS + 1;
 
 	if (len >= 2 && raw[0] == '(' && raw[len - 1] == ')') {
 		const char *body = raw + 1;
@@ -565,11 +576,11 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 			bm_alt_from_seg(body, blen, nt, &alts[na++]);
 		} else {
 			/* split on '|', then drop trailing empty segments (Java) */
-			struct { int s, l; } segs[64];
+			struct { int s, l; } segs[BMPM_CAP_PHONEME_ALTS + 1];
 			int ns = 0, start = 0;
 			for (i = 0; i <= blen; i++) {
 				if (i == blen || body[i] == '|') {
-					if (ns < 64) { segs[ns].s = start; segs[ns].l = i - start; ns++; }
+					if (ns < seg_cap) { segs[ns].s = start; segs[ns].l = i - start; ns++; }
 					start = i + 1;
 				}
 			}
@@ -720,6 +731,13 @@ static int bm_phon_cmp(const char *a, size_t an, const char *b, size_t bn)
 	return 0;
 }
 
+static int bm_phon_qcmp(const void *va, const void *vb)
+{
+	const phon_t *a = (const phon_t *) va;
+	const phon_t *b = (const phon_t *) vb;
+	return bm_phon_cmp(PHON_T(a), a->tn, PHON_T(b), b->tn);
+}
+
 /* Apply a final ruleset (common, then language-specific). Re-transcribes each
  * phoneme's text, then collapses duplicates by text while unioning language
  * sets, leaving the result ordered by the phoneme comparator. */
@@ -734,86 +752,90 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 	}
 
 	pb_init(&result);
+	/* Text → index in result for O(1) language merges. Final sort restores
+	 * Rule.Phoneme.COMPARATOR order once (was O(R²) insert-sort per merge). */
+	{
+		HashTable seen;
+		zend_hash_init(&seen, 32, NULL, NULL, 0);
 
-	for (pi = 0; pi < pb->n; pi++) {
-		phon_t *P = &pb->a[pi];
-		pbuilder sub;
-		int tn, i;
-		uint32_t stk[512];
-		uint32_t *tcp;
-		size_t si;
+		for (pi = 0; pi < pb->n; pi++) {
+			phon_t *P = &pb->a[pi];
+			pbuilder sub;
+			int tn, i;
+			uint32_t stk[512];
+			uint32_t *tcp;
+			size_t si;
 
-		pb_init(&sub);
-		pb_seed(&sub, P->langs);
+			pb_init(&sub);
+			pb_seed(&sub, P->langs);
 
-		/* Phoneme text is pure ASCII (rule phonemes are ASCII, and the
-		 * unmatched-character fallback below only re-appends such bytes), so
-		 * byte == code point: widen in place instead of UTF-8-decoding, on the
-		 * stack for every realistic length. */
-		tcp = P->tn <= 512 ? stk : safe_emalloc(P->tn, sizeof(uint32_t), 0);
-		tn = (int) P->tn;
-		{
-			const char *pt = PHON_T(P);
-			for (i = 0; i < tn; i++) tcp[i] = (unsigned char) pt[i];
-		}
+			/* Phoneme text is pure ASCII (rule phonemes are ASCII, and the
+			 * unmatched-character fallback below only re-appends such bytes), so
+			 * byte == code point: widen in place instead of UTF-8-decoding, on the
+			 * stack for every realistic length. */
+			tcp = P->tn <= 512 ? stk : safe_emalloc(P->tn, sizeof(uint32_t), 0);
+			tn = (int) P->tn;
+			{
+				const char *pt = PHON_T(P);
+				for (i = 0; i < tn; i++) tcp[i] = (unsigned char) pt[i];
+			}
 
-		i = 0;
-		while (i < tn) {
-			int adv = 1, found = 0, off = 0, cnt = 0;
-			if (rs_dispatch(ix, tcp[i], &off, &cnt)) {
-				int t;
-				for (t = 0; t < cnt; t++) {
-					int r = ix->order[off + t];
-					const uint32_t *pat = ix->decoded[r].pat;
-					int plen = ix->decoded[r].plen;
-					if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
-					if (plen > tn - i) continue;
-					if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
-					if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
-					if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
-					pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max);
-					found = 1;
-					adv = plen;
-					break;
+			i = 0;
+			while (i < tn) {
+				int adv = 1, found = 0, off = 0, cnt = 0;
+				if (rs_dispatch(ix, tcp[i], &off, &cnt)) {
+					int t;
+					for (t = 0; t < cnt; t++) {
+						int r = ix->order[off + t];
+						const uint32_t *pat = ix->decoded[r].pat;
+						int plen = ix->decoded[r].plen;
+						if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
+						if (plen > tn - i) continue;
+						if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
+						if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
+						if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
+						pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max);
+						found = 1;
+						adv = plen;
+						break;
+					}
 				}
+				if (!found) {
+					char ch = (char) tcp[i];
+					pb_append_all(&sub, &ch, 1);
+				}
+				i += adv;
 			}
-			if (!found) {
-				char ch = (char) tcp[i];
-				pb_append_all(&sub, &ch, 1);
-			}
-			i += adv;
-		}
-		if (tcp != stk) efree(tcp);
+			if (tcp != stk) efree(tcp);
 
-		for (si = 0; si < sub.n; si++) {
-			phon_t *np = &sub.a[si];
-			size_t k;
-			int merged = 0;
-			for (k = 0; k < result.n; k++) {
-				if (result.a[k].tn == np->tn && memcmp(PHON_T(&result.a[k]), PHON_T(np), np->tn) == 0) {
+			for (si = 0; si < sub.n; si++) {
+				phon_t *np = &sub.a[si];
+				zval *existing = zend_hash_str_find(&seen, PHON_T(np), np->tn);
+				if (existing) {
+					size_t k = (size_t) Z_LVAL_P(existing);
 					result.a[k].langs = ls_merge(result.a[k].langs, np->langs);
-					merged = 1;
-					break;
+				} else {
+					size_t idx = result.n;
+					zval zidx;
+					pb_reserve(&result, result.n + 1);
+					/* Move the whole phoneme (heap pointer or inline bytes) into
+					 * the result, then null the source's heap pointer so pb_free
+					 * skips it; inline entries carry no pointer and need no cleanup. */
+					result.a[idx] = *np;
+					np->t = NULL;
+					result.n++;
+					ZVAL_LONG(&zidx, (zend_long) idx);
+					zend_hash_str_update(&seen, PHON_T(&result.a[idx]), result.a[idx].tn, &zidx);
 				}
 			}
-			if (!merged) {
-				size_t pos = 0;
-				pb_reserve(&result, result.n + 1);
-				while (pos < result.n &&
-				       bm_phon_cmp(PHON_T(&result.a[pos]), result.a[pos].tn, PHON_T(np), np->tn) < 0) {
-					pos++;
-				}
-				memmove(&result.a[pos + 1], &result.a[pos],
-				        (result.n - pos) * sizeof(phon_t));
-				/* Move the whole phoneme (heap pointer or inline bytes) into the
-				 * result, then null the source's heap pointer so pb_free skips
-				 * it; inline entries carry no pointer and need no cleanup. */
-				result.a[pos] = *np;
-				np->t = NULL;
-				result.n++;
-			}
+			pb_free(&sub);
 		}
-		pb_free(&sub);
+
+		zend_hash_destroy(&seen);
+	}
+
+	if (result.n > 1) {
+		qsort(result.a, result.n, sizeof(phon_t), bm_phon_qcmp);
 	}
 
 	pb_free(pb);
@@ -843,9 +865,15 @@ static char *pb_makestring(pbuilder *pb, size_t *outlen)
 
 static char *bm_pair_string(const char *renc, size_t rr, const char *cenc, size_t cr, size_t *outlen)
 {
-	size_t len = rr + cr + 5;
-	char *out = emalloc(len + 1);
+	size_t len;
+	char *out;
 	size_t pos = 0;
+
+	if (rr > SIZE_MAX - cr || rr + cr > SIZE_MAX - 5) {
+		php_error_docref(NULL, E_ERROR, "phonetic: BMPM prefix pair exceeds allocation limit");
+	}
+	len = rr + cr + 5;
+	out = safe_emalloc(len, 1, 1);
 
 	out[pos++] = '(';
 	if (rr) {
@@ -1208,7 +1236,7 @@ static int bm_validate_accuracy(zend_long accuracy, uint32_t arg_num)
  * key the generated rulesets. Callers must have passed bm_validate_accuracy. */
 static zend_always_inline int bm_accuracy_rule_type(zend_long accuracy)
 {
-	return accuracy == PH_BMPM_EXACT ? BMPM_EXACT : BMPM_APPROX;
+	return accuracy == PH_BMPM_EXACT ? BMPM_RT_EXACT : BMPM_RT_APPROX;
 }
 
 static int bm_validate_input_len(zend_string *input, uint32_t arg_num)
@@ -1417,16 +1445,17 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 
 	if (rs->rules == NULL || rs->count == 0) return;
 
-	ix->decoded = pemalloc(rs->count * sizeof(rule_decoded), 1);
+	/* pecalloc so a mid-MINIT abort leaves freeable pointers NULL for MSHUTDOWN. */
+	ix->decoded = pecalloc(rs->count, sizeof(rule_decoded), 1);
 	for (i = 0; i < rs->count; i++) {
-		uint32_t b[64];
-		ix->decoded[i].plen = bm_decode_buf_or_fail(rs->rules[i].pattern, b, 64, "rule pattern");
+		uint32_t b[BMPM_CAP_PATTERN_CPS];
+		ix->decoded[i].plen = bm_decode_buf_or_fail(rs->rules[i].pattern, b, BMPM_CAP_PATTERN_CPS, "rule pattern");
 		total += (size_t) ix->decoded[i].plen;
 	}
 	ix->arena = pemalloc((total ? total : 1) * sizeof(uint32_t), 1);
 	for (i = 0; i < rs->count; i++) {
 		int pl = ix->decoded[i].plen;
-		alt_t tmp_alts[64];
+		alt_t tmp_alts[BMPM_CAP_PHONEME_ALTS + 1];
 		int na;
 		bm_decode_buf_or_fail(rs->rules[i].pattern, ix->arena + pos, pl, "rule pattern");
 		ix->decoded[i].pat = ix->arena + pos;
@@ -1435,7 +1464,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 		ix->decoded[i].rctx = bm_build_ctx_R(rs->rules[i].rcontext, 1, &ix->decoded[i].rctx_n);
 		/* pre-parse the phoneme column (alt texts point into the static rule
 		 * data), so pb_apply never re-parses it at match time */
-		na = bm_parse_phoneme_expr(rs->rules[i].phoneme, rs->name_type, tmp_alts, 64);
+		na = bm_parse_phoneme_expr(rs->rules[i].phoneme, rs->name_type, tmp_alts, BMPM_CAP_PHONEME_ALTS + 1);
 		ix->decoded[i].alts = pemalloc((na ? (size_t) na : 1) * sizeof(alt_t), 1);
 		if (na) memcpy(ix->decoded[i].alts, tmp_alts, (size_t) na * sizeof(alt_t));
 		ix->decoded[i].nalts = na;
@@ -1482,17 +1511,18 @@ static void bm_build_lang_index(const bmpm_lang_set *S, int nt, langset_index *l
 {
 	size_t r;
 	li->count = S->count;
-	li->rules = pemalloc((S->count ? S->count : 1) * sizeof(lang_parsed), 1);
+	/* Zero so a mid-loop abort leaves freeable fields NULL for MSHUTDOWN. */
+	li->rules = pecalloc(S->count ? S->count : 1, sizeof(lang_parsed), 1);
 	for (r = 0; r < S->count; r++) {
 		lang_parsed *lp = &li->rules[r];
-		uint32_t buf[128];
-		atom_t tmp[128];
-		int dn = bm_decode_buf_or_fail(S->rules[r].pattern, buf, 128, "language pattern");
+		uint32_t buf[BMPM_CAP_GUESS_CPS];
+		atom_t tmp[BMPM_CAP_GUESS_CPS];
+		int dn = bm_decode_buf_or_fail(S->rules[r].pattern, buf, BMPM_CAP_GUESS_CPS, "language pattern");
 		int as, ae, na;
 		lp->R = pemalloc((dn ? (size_t) dn : 1) * sizeof(uint32_t), 1);
 		if (dn) memcpy(lp->R, buf, (size_t) dn * sizeof(uint32_t));
 		lp->Rn = dn;
-		na = bm_parse_regex(lp->R, dn, tmp, 128, &as, &ae);
+		na = bm_parse_regex(lp->R, dn, tmp, BMPM_CAP_GUESS_CPS, &as, &ae);
 		lp->as = as; lp->ae = ae; lp->na = na;
 		lp->atoms = pemalloc((na ? (size_t) na : 1) * sizeof(atom_t), 1);
 		if (na) memcpy(lp->atoms, tmp, (size_t) na * sizeof(atom_t));
@@ -1515,11 +1545,11 @@ static void bm_build_lang_index(const bmpm_lang_set *S, int nt, langset_index *l
 void bmpm_minit(void)
 {
 	size_t i;
-	g_rs_index = pemalloc(bmpm_rulesets_count * sizeof(ruleset_index), 1);
+	g_rs_index = pecalloc(bmpm_rulesets_count, sizeof(ruleset_index), 1);
 	for (i = 0; i < bmpm_rulesets_count; i++) {
 		bm_build_ruleset_index(&bmpm_rulesets[i], &g_rs_index[i]);
 	}
-	g_lang_index = pemalloc(bmpm_lang_sets_count * sizeof(langset_index), 1);
+	g_lang_index = pecalloc(bmpm_lang_sets_count, sizeof(langset_index), 1);
 	for (i = 0; i < bmpm_lang_sets_count; i++) {
 		bm_build_lang_index(&bmpm_lang_sets[i], bmpm_lang_sets[i].name_type, &g_lang_index[i]);
 	}

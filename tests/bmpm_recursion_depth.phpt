@@ -27,9 +27,9 @@ var_dump(bmpm("Jackson"));
 echo "survived\n";
 ?>
 --EXPECT--
-string(82) "()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(()-(|t))))))))))))))))"
+string(32) "()-(()-(()-(()-(()-(()-(|t))))))"
 bool(true)
 bool(true)
-int(676323)
+int(279883)
 string(77) "iakson|iaksun|iatskson|iatsksun|iokson|ioksun|iotskson|iotsksun|zakson|zokson"
 survived

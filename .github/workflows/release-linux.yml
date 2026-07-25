@@ -37,11 +37,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Full-matrix PHPT + codegen/parity on the release ref. No release assets are
+  # uploaded here: a failed cell must block *all* publishing (see publish job).
   build:
     name: ${{ matrix.os }} php ${{ matrix.php }}
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write # Uploads binary assets when a release tag is selected.
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -70,9 +72,27 @@ jobs:
           tools: phpize
           coverage: none
 
+      - name: Codegen + arginfo freshness (one cell is enough; run on ubuntu x86_64)
+        if: matrix.os == 'ubuntu-24.04' && matrix.php == '8.4'
+        run: |
+          set -euo pipefail
+          php scripts/gen_bmpm_data.php
+          git diff --exit-code src/bmpm_data.h
+          php scripts/check_arginfo.php
+
+      - name: Commons Codec parity
+        if: matrix.os == 'ubuntu-24.04' && matrix.php == '8.4'
+        run: |
+          set -euo pipefail
+          phpize
+          ./configure --enable-phonetic --enable-phonetic-dev
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          php -d extension="$(pwd)/modules/phonetic.so" scripts/oracle/parity/check.php
+          git clean -xdf .
+
       # Test this exact checkout before any upload. On a plain dispatch this is
-      # the complete validation path; release/backfill runs package only after it
-      # passes.
+      # the complete validation path; release/backfill runs package only after the
+      # full matrix succeeds (publish job needs: build).
       - name: Build and test tagged source
         run: |
           set -euo pipefail
@@ -97,18 +117,37 @@ jobs:
             echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
           fi
 
-      # pie-ext-binary-builder rebuilds in this same workspace without a clean
-      # step, so its make would silently reuse the objects compiled above with
-      # the test configure's flags instead of the packaging configure's. Drop
-      # every build artifact so the shipped binary is compiled from scratch
-      # under exactly the flags the builder requests.
-      - name: Clean test-build artifacts
-        run: git clean -xdf .
+  # Upload only after every build matrix cell succeeded. Prevents a partial
+  # release when one OS/PHP cell fails while others already finished.
+  publish:
+    name: Publish ${{ matrix.os }} php ${{ matrix.php }}
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-14
+        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
 
-      # Real build + upload: on a published release, or a dispatch that names
-      # an existing release tag to attach assets to.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # master
+        with:
+          php-version: ${{ matrix.php }}
+          tools: phpize
+          coverage: none
+
       - name: Build and upload prebuilt binary
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
         uses: php/pie-ext-binary-builder@5298761950f63c7e9565ed7004e922b346e4386c # 0.0.3
         with:
           release-tag: ${{ github.event.release.tag_name || inputs.release_tag }}
