@@ -125,7 +125,7 @@ jobs:
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: write # Uploads Linux/macOS prebuilt .so assets to the GitHub Release.
     strategy:
       fail-fast: false
       matrix:
