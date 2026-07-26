@@ -1,7 +1,8 @@
 This project is distributed under two licenses. The phonetic extension itself is
 licensed under the BSD 3-Clause license (Section 1). The phonetic rule data
-vendored under vendor/commons-codec-bm/ is licensed under the Apache License,
-Version 2.0 (Section 2).
+vendored under vendor/commons-codec-bm/ — and the same data as compiled into the
+generated tables in src/bmpm_data.h that ship in the binary — is licensed under
+the Apache License, Version 2.0 (Section 2).
 
 ================================================================================
 Section 1: BSD 3-Clause License (the phonetic extension)
@@ -42,6 +43,8 @@ Section 2: Apache License 2.0 (vendored rule data)
 The files under vendor/commons-codec-bm/ are derived from Apache Commons Codec
 (https://github.com/apache/commons-codec) and are licensed to you under the
 Apache License, Version 2.0. Each vendored file retains its original Apache-2.0
-license header. See vendor/commons-codec-bm/VENDOR.md for the exact upstream
-commit and file provenance. The complete license terms are in LICENSE-APACHE;
-the upstream attribution notice is in NOTICE.
+license header. The generated C header src/bmpm_data.h embeds those tables for
+the BMPM and Daitch-Mokotoff engines; the embedded tables remain Apache-2.0.
+See vendor/commons-codec-bm/VENDOR.md for the exact upstream commit and file
+provenance. The complete license terms are in LICENSE-APACHE; the upstream
+attribution notice is in NOTICE.

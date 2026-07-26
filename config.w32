@@ -9,6 +9,10 @@ ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-
 ARG_ENABLE("phonetic-dev", "phonetic: treat compiler warnings as errors (/WX)", "no");
 
 if (PHP_PHONETIC != "no") {
+	// Mirror config.m4: require PHP 8.1+ (composer.json / README contract).
+	if (PHP_VERSION_ID < 80100) {
+		ERROR("phonetic requires PHP 8.1.0 or later");
+	}
 	EXTENSION("phonetic", "phonetic.c");
 	ADD_SOURCES(configure_module_dirname + "/src",
 		"double_metaphone.c bmpm.c dm_soundex.c nysiis.c match_rating.c", "phonetic");

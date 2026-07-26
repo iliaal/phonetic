@@ -14,6 +14,10 @@ var_dump(bin2hex($c["alternate"])); // 5220 = "R" + space
 $s = double_metaphone("SAN JOSE", 0);
 var_dump($s["primary"]);
 var_dump($s["alternate"]);
+// Match must not trim the alternate space: Ray encodes to primary "R".
+// If alternate "R " were trimmed to "R", strength would wrongly become 1.
+var_dump(double_metaphone_match("Raj", "Ray"));
+var_dump(double_metaphone_match("Raj", "Raj"));
 ?>
 --EXPECT--
 string(2) "RJ"
@@ -21,3 +25,5 @@ string(2) "R "
 string(4) "5220"
 string(4) "SNHS"
 string(4) "SNHS"
+int(0)
+int(2)

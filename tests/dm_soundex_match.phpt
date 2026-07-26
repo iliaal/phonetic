@@ -17,6 +17,8 @@ var_dump(dm_soundex_match("Auerbach", "Oerback"));
 var_dump(dm_soundex("A") === dm_soundex("1"));
 var_dump(dm_soundex_match("A", "1"));
 var_dump(dm_soundex_match("A", "E"));
+// Identical unencodable operands: must stay false (not identity short-circuit).
+var_dump(dm_soundex_match("Иванов", "Иванов"));
 ?>
 --EXPECT--
 bool(true)
@@ -40,3 +42,4 @@ bool(true)
 bool(true)
 bool(false)
 bool(true)
+bool(false)

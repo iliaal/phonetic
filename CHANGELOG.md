@@ -9,8 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `bmpm()` MINIT: oversize phoneme `|` alternative lists hard-fail with
-  `E_CORE_ERROR` (same policy as language brackets; generator already enforces).
+- `bmpm()` MINIT: language lists exceeding `BMPM_CAP_LANGUAGES` hard-fail;
+  oversize phoneme `|` alternative lists hard-fail with `E_CORE_ERROR` (same
+  policy as language brackets; generator already enforces).
+- `match_rating_compare()`: skip second encode when the first cleans to empty.
+- `config.w32`: require PHP 8.1+ (parity with `config.m4`).
+- Tests: match-helper oracle pins; forced-language `bmpm_match` flip;
+  identical unencodable DM match; final-J space match; `John Smith` multiword.
+- Docs: forced-language API note; Double Metaphone unmapped non-ASCII fold;
+  LICENSE Section 2 names generated `bmpm_data.h` embedding.
 - Docs: DM index example queries every non-`000000` code (not only `[0]`).
 - `scripts/regen_arginfo.sh`: prefers `$HOME/php-install-PHP-8.1/bin/php` when
   `PHP_BIN` is unset; documents tokenizer/gen_stub requirements.

@@ -18,6 +18,10 @@ var_dump(bmpm_match("Moskowitz", "Moskovitz", BMPM_ASHKENAZI));
 // Sephardic path: identical and a near-miss under that name type
 var_dump(bmpm_match("Garcia", "Garcia", BMPM_SEPHARDIC));
 var_dump(bmpm_match("Garcia", "Xylophone", BMPM_SEPHARDIC));
+// Forced language changes a non-identity comparison (not identity short-circuit).
+// Nelson/Nilsson intersect under auto-detect but not under forced english.
+var_dump(bmpm_match("Nelson", "Nilsson"));
+var_dump(bmpm_match("Nelson", "Nilsson", BMPM_GENERIC, BMPM_APPROX, "english"));
 // "any" is rejected (not a forced language)
 try {
     bmpm_match("Smith", "Smith", BMPM_GENERIC, BMPM_APPROX, "any");
@@ -35,6 +39,8 @@ bool(true)
 bool(false)
 bool(true)
 bool(true)
+bool(true)
+bool(false)
 bool(true)
 bool(false)
 bmpm_match(): Argument #5 ($language) "any" is not a forced language; pass an empty string for auto-detect

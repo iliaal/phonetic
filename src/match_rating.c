@@ -327,10 +327,15 @@ PHP_FUNCTION(match_rating_compare)
 	}
 
 	na = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
+	/* Empty first encode: skip the second pipeline (same as other *_match). */
+	if (nal == 0) {
+		efree(na);
+		RETURN_FALSE;
+	}
 	nb = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
 
 	/* An input that cleans away to nothing has no comparable code. */
-	if (nal == 0 || nbl == 0) {
+	if (nbl == 0) {
 		efree(na);
 		efree(nb);
 		RETURN_FALSE;

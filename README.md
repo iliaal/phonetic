@@ -67,7 +67,10 @@ bmpm("Jackson");                           // "iakson|iaksun|...|zokson"
 bmpm("Garcia", BMPM_SEPHARDIC, BMPM_EXACT);// "garsia|gartSa"
 ```
 
-Empty `$language` auto-detects; pass a language name (e.g. `"russian"`) to force it.
+Empty `$language` auto-detects; pass an **exact lowercase** language token for
+that name type (e.g. `"russian"`, `"english"`) to force it. Tokens are
+name-type-specific (GENERIC has the largest set; ASHKENAZI/SEPHARDIC are
+subsets). The label `"any"` is not forceable — see Notes.
 
 Constants (numeric values):
 
@@ -252,8 +255,11 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 - **Greek-script input is a known limitation:** Greek capitals are not lowercased
   (the algorithm's context-sensitive final-sigma cannot be expressed by a point-wise
   case map), so pass Greek names already lowercased or romanized.
-- `double_metaphone()` targets ASCII/Latin; non-letter bytes are skipped, matching
-  Apache Commons Codec.
+- `double_metaphone()` targets ASCII/Latin; non-letter ASCII bytes are kept then
+  skipped in the main loop (so they break multi-letter clusters). Unmapped
+  non-ASCII code points outside the fold table are dropped entirely, so a
+  non-breaking space or similar separator can join letters that an ASCII hyphen
+  would keep apart — prefer ASCII punctuation for dirty multi-script input.
 - `nysiis()` matches Commons Codec on ASCII surnames; cleaning is deliberately
   ASCII-only (stricter than Commons `SoundexUtils.clean`, which keeps any
   Unicode letter). `match_rating()` operates on ASCII letters and folds the

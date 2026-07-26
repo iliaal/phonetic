@@ -52,7 +52,7 @@
 
 /* The GENERIC d'/name-prefix handling recurses (bm_encode_core -> bm_encode_sub
  * -> bm_encode_core), peeling one prefix per level and dual-encoding
- * (remainder)+(combined). Real names nest at most one or two prefixes; crafted
+ * (remainder)-(combined). Real names nest at most one or two prefixes; crafted
  * input would otherwise drive exponential work (binary tree of encodes) and/or
  * C-stack smash. Past this depth, encode the remainder inline without branching.
  * Six levels is well above realistic names while bounding fan-out (2^6 leaves). */
@@ -102,6 +102,13 @@ static const bmpm_language_list *bm_nt_langs(int nt)
 static langset_t ls_full(int nt)
 {
 	const bmpm_language_list *l = bm_nt_langs(nt);
+	/* langset_t is 32 bits; CAP is 31 so full masks stay in range. Generator
+	 * enforces the same bound; fail hard on corrupt tables. */
+	if (l == NULL || l->count == 0 || l->count > BMPM_CAP_LANGUAGES) {
+		zend_error_noreturn(E_CORE_ERROR,
+			"phonetic: language list for name type exceeds BMPM_CAP_LANGUAGES (%d)",
+			BMPM_CAP_LANGUAGES);
+	}
 	return (langset_t) ((1u << l->count) - 1u);
 }
 
@@ -109,6 +116,9 @@ static int bm_lang_index(int nt, const char *name, size_t len)
 {
 	const bmpm_language_list *l = bm_nt_langs(nt);
 	size_t i;
+	if (l == NULL) {
+		return -1;
+	}
 	for (i = 0; i < l->count; i++) {
 		if (strlen(l->languages[i]) == len && memcmp(l->languages[i], name, len) == 0) {
 			return (int) i;
@@ -124,9 +134,17 @@ static langset_t bm_parse_lang_list(int nt, const char *s)
 	const char *p = s;
 	while (*p) {
 		const char *start = p;
+		int idx;
 		while (*p && *p != '+') p++;
-		int idx = bm_lang_index(nt, start, (size_t) (p - start));
-		if (idx >= 0) mask |= (1u << idx);
+		idx = bm_lang_index(nt, start, (size_t) (p - start));
+		if (idx >= 0) {
+			if ((unsigned) idx >= BMPM_CAP_LANGUAGES) {
+				zend_error_noreturn(E_CORE_ERROR,
+					"phonetic: language index exceeds BMPM_CAP_LANGUAGES (%d)",
+					BMPM_CAP_LANGUAGES);
+			}
+			mask |= (1u << idx);
+		}
 		if (*p == '+') p++;
 	}
 	return mask;

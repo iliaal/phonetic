@@ -107,7 +107,12 @@ static const char *dmet_fold_cp(unsigned cp)
 /* Decode UTF-8, ASCII-fold accented Latin, upper-case; spaces are preserved
  * so multi-word input keeps its word boundaries. Malformed sequences decode
  * as single raw bytes (ph_u8_next), so a stray lead byte folds as its Latin-1
- * character instead of swallowing the letters after it. */
+ * character instead of swallowing the letters after it.
+ *
+ * Unmapped non-ASCII code points (outside dmet_fold_cp) are dropped: combining
+ * marks and exotic letters vanish rather than blocking clusters. That means a
+ * UTF-8 non-letter separator (e.g. NBSP) can join "S"+"CH" into SCH, unlike an
+ * ASCII hyphen which is kept and later skipped as a non-letter. Documented. */
 static void dmet_fold(const char *src, size_t len, smart_str *out)
 {
 	size_t i = 0;
