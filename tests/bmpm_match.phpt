@@ -15,8 +15,9 @@ var_dump(bmpm_match("Peterson", "Petersen", BMPM_GENERIC, BMPM_EXACT));
 var_dump(bmpm_match("Peterson", "Peterson", BMPM_GENERIC, BMPM_EXACT, "english"));
 // Ashkenazi path still intersects for this classic pair
 var_dump(bmpm_match("Moskowitz", "Moskovitz", BMPM_ASHKENAZI));
-// Sephardic path: identical and a near-miss under that name type
+// Sephardic path: identity, non-identity true, and distant false
 var_dump(bmpm_match("Garcia", "Garcia", BMPM_SEPHARDIC));
+var_dump(bmpm_match("Garcia", "Garciaa", BMPM_SEPHARDIC));
 var_dump(bmpm_match("Garcia", "Xylophone", BMPM_SEPHARDIC));
 // Forced language changes a non-identity comparison (not identity short-circuit).
 // Nelson/Nilsson intersect under auto-detect but not under forced english.
@@ -37,6 +38,7 @@ bool(false)
 bool(false)
 bool(true)
 bool(false)
+bool(true)
 bool(true)
 bool(true)
 bool(true)

@@ -16,6 +16,11 @@ var_dump(match_rating_compare(".,-", "-,."));
 // Symmetric: an empty side yields 0 regardless of position.
 var_dump(double_metaphone_match("", "x"));
 var_dump(double_metaphone_match("x", ""));
+// Identical operands that clean/encode to empty must stay non-matches
+// (guards against identity short-circuit before the empty check).
+var_dump(nysiis_match("123", "123"));
+var_dump(bmpm_match("   ", "   "));
+var_dump(double_metaphone_match(" ", " "));
 ?>
 --EXPECT--
 bool(false)
@@ -25,4 +30,7 @@ bool(false)
 bool(true)
 bool(false)
 int(0)
+int(0)
+bool(false)
+bool(false)
 int(0)

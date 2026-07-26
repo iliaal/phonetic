@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Regenerate phonetic_arginfo.h from phonetic.stub.php using the vendored
-# gen_stub.php (same tool /php-stub-regen wraps). Run from the repo root or any path.
+# Regenerate phonetic_arginfo.h from phonetic.stub.php.
 #
-# Requires a PHP CLI that can run build/gen_stub.php (php-src stub generator
-# needs the tokenizer extension and the vendored PHP-Parser under build/).
-# Prefer the same PHP you use for phpize/configure, e.g.:
+# gen_stub.php is *not* vendored in-repo: it appears under build/ after phpize
+# (php-src stub generator + PHP-Parser). From a clean clone:
+#   phpize && ./configure --enable-phonetic
+# then re-run this script. Same tool /php-stub-regen wraps.
+#
+# Requires a PHP CLI with the tokenizer extension. Prefer the same PHP you use
+# for phpize/configure, e.g.:
 #   PHP_BIN=$HOME/php-install-PHP-8.1/bin/php ./scripts/regen_arginfo.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ -z "${PHP_BIN:-}" ]]; then
-	# Prefer a known project install if present, else PATH `php`.
 	if [[ -x "${HOME}/php-install-PHP-8.1/bin/php" ]]; then
 		PHP_BIN="${HOME}/php-install-PHP-8.1/bin/php"
 	else
@@ -20,7 +22,8 @@ fi
 
 GEN="$ROOT/build/gen_stub.php"
 if [[ ! -f "$GEN" ]]; then
-	echo "missing $GEN (vendored php-src gen_stub.php)" >&2
+	echo "missing $GEN" >&2
+	echo "run phpize (and optionally ./configure --enable-phonetic) first so build/gen_stub.php exists" >&2
 	exit 1
 fi
 if ! command -v "$PHP_BIN" >/dev/null 2>&1 && [[ ! -x "$PHP_BIN" ]]; then

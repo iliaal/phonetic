@@ -21,4 +21,28 @@ if (!hash_equals($expected, $matches[1])) {
     exit(1);
 }
 
+// Accuracy ints are dual-owned: stub registers public BMPM_* and C validates
+// with PH_BMPM_*. Keep them locked together (stub is the public source).
+$cFile = $root . '/src/bmpm.c';
+$c = file_get_contents($cFile);
+if ($c === false) {
+    fwrite(STDERR, "could not read src/bmpm.c\n");
+    exit(2);
+}
+foreach (['APPROX' => 10, 'EXACT' => 20] as $name => $want) {
+    if (!preg_match('/const\s+BMPM_' . $name . '\s*=\s*(\d+)\s*;/', $stub, $sm)) {
+        fwrite(STDERR, "stub missing BMPM_{$name}\n");
+        exit(2);
+    }
+    if (!preg_match('/#define\s+PH_BMPM_' . $name . '\s+(\d+)/', $c, $cm)) {
+        fwrite(STDERR, "src/bmpm.c missing PH_BMPM_{$name}\n");
+        exit(2);
+    }
+    if ((int) $sm[1] !== $want || (int) $cm[1] !== $want || (int) $sm[1] !== (int) $cm[1]) {
+        fwrite(STDERR, "BMPM_{$name} mismatch: stub={$sm[1]} C={$cm[1]} expected={$want}\n");
+        exit(1);
+    }
+}
+
 echo "arginfo hash matches phonetic.stub.php\n";
+echo "PH_BMPM_* accuracy values match stub\n";

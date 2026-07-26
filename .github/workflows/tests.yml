@@ -73,7 +73,10 @@ jobs:
             if (!extension_loaded("phonetic")) { fwrite(STDERR, "load failed\n"); exit(1); }
             $dm = double_metaphone("Smith");
             if (($dm["primary"] ?? "") !== "SM0") { fwrite(STDERR, "dm mismatch\n"); exit(1); }
-            if (!bmpm_match("Jackson", "Jaxon")) { fwrite(STDERR, "bmpm_match failed\n"); exit(1); }
+            if (!bmpm_match("Jackson", "Jaxon")) { fwrite(STDERR, "bmpm_match true failed\n"); exit(1); }
+            if (bmpm_match("Smith", "Xylophone")) { fwrite(STDERR, "bmpm_match false failed\n"); exit(1); }
+            if (double_metaphone_match("Catherine", "Kathryn") !== 2) { fwrite(STDERR, "dmet strength failed\n"); exit(1); }
+            if (double_metaphone_match("Smith", "Xylophone") !== 0) { fwrite(STDERR, "dmet no-match failed\n"); exit(1); }
             echo "pie functional smoke ok\n";
           '
 
@@ -350,11 +353,24 @@ jobs:
         with:
           persist-credentials: false
       # run-tests.php exits 0 when every test is SKIPPED (extension load
-      # failure). Linux/macOS jobs fail-closed on that; Windows depends on
-      # php-windows-builder's SDK toolchain (setup-php has no phpize here).
+      # failure). Linux/macOS jobs fail-closed on that; this action runs
+      # build+tests in one step. Assert the DLL was produced so a total
+      # package failure cannot look green. Residual: all-SKIP with a present
+      # DLL still depends on the builder's test runner exit policy.
       - uses: php/php-windows-builder/extension@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           run-tests: 'true'
+          args: '--enable-phonetic'
+      - name: Assert Windows DLL was produced
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path . -Recurse -Filter "php_phonetic.dll" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "::error::php_phonetic.dll not found after Windows build"
+            exit 1
+          }
+          Write-Host "Found $($dll.FullName)"

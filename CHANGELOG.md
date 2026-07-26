@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: PIE smoke pins a false `bmpm_match` and Double Metaphone match strengths;
+  Windows jobs assert `php_phonetic.dll` was produced after the builder step.
+- Tests: cleaned-empty identity match pins; multiword concat non-match;
+  SEPHARDIC non-identity true pair; forced-language case-sensitivity.
+- `scripts/check_arginfo.php` locks `PH_BMPM_*` accuracy ints to the stub;
+  smoke no longer hardcodes the version string; regen_arginfo docs fixed.
 - `bmpm()` MINIT: language lists exceeding `BMPM_CAP_LANGUAGES` hard-fail;
   oversize phoneme `|` alternative lists hard-fail with `E_CORE_ERROR` (same
   policy as language brackets; generator already enforces).
