@@ -61,6 +61,9 @@
 #define BMPM_CAP_LANG_BRACKET 63
 #define BMPM_CAP_GUESS_CPS    128
 #define BMPM_CAP_LANGUAGES    31
+/* DM Soundex replacement-field caps (dms_encode alts[][]). */
+#define DMS_CAP_CODE_ALTS     8
+#define DMS_CAP_CODE_LEN      3
 
 enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };
 enum bmpm_rule_type { BMPM_RULES = 0, BMPM_RT_APPROX = 1, BMPM_RT_EXACT = 2 };

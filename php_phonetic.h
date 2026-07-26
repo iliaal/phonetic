@@ -17,6 +17,10 @@
 
 #define PHP_PHONETIC_VERSION "0.4.0"
 
+/* Shared security bound for the branching rule engines (BMPM + DM Soundex).
+ * Both public encode and match entry points reject longer inputs with ValueError. */
+#define PHONETIC_MAX_RULED_INPUT 4096
+
 extern zend_module_entry phonetic_module_entry;
 #define phpext_phonetic_ptr &phonetic_module_entry
 

@@ -4,7 +4,8 @@
  * @generate-class-entries
  *
  * Function signatures and the BMPM_* constants are declared here; run
- * /php-stub-regen after editing to refresh phonetic_arginfo.h.
+ * scripts/regen_arginfo.sh (or /php-stub-regen) after editing to refresh
+ * phonetic_arginfo.h.
  */
 
 /** @var int */

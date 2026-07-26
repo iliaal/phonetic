@@ -133,14 +133,18 @@ static void dmet_fold(const char *src, size_t len, smart_str *out)
 	}
 }
 
-/* Core encoder. `folded` is upper-cased ASCII; emits the full (untruncated)
- * primary and alternate codes into the supplied buffers. */
-static void dmet_encode(const char *folded, size_t len, smart_str *primary, smart_str *secondary)
+/* Core encoder. `folded` is upper-cased ASCII; emits primary and alternate
+ * codes into the supplied buffers. When max_length > 0, stop once both codes
+ * have reached that length (still post-truncate multi-char emissions that
+ * overshoot). max_length <= 0 means unlimited (full codes). */
+static void dmet_encode(const char *folded, size_t len, smart_str *primary, smart_str *secondary,
+	zend_long max_length)
 {
 	int total, start, end, pos, slavo;
 	char *buf;
 	const char *pc, *sc;
 	int adv;
+	size_t cap = (max_length > 0) ? (size_t) max_length : 0;
 
 	if (len == 0) {
 		return;
@@ -718,6 +722,16 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 			smart_str_appends(secondary, sc);
 		}
 		pos += adv;
+
+		/* Commons Codec stops when both codes have reached maxCodeLength.
+		 * Keep post-truncation for multi-char emissions that overshoot. */
+		if (cap > 0) {
+			size_t pl = primary->s ? ZSTR_LEN(primary->s) : 0;
+			size_t sl = secondary->s ? ZSTR_LEN(secondary->s) : 0;
+			if (pl >= cap && sl >= cap) {
+				break;
+			}
+		}
 	}
 
 #undef B
@@ -726,8 +740,9 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 	efree(buf);
 }
 
-/* Fold + encode one string into its untruncated primary/alternate codes. */
-static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *primary, smart_str *secondary)
+/* Fold + encode one string; max_length <= 0 means full untruncated codes. */
+static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *primary, smart_str *secondary,
+	zend_long max_length)
 {
 	smart_str folded = {0};
 
@@ -738,7 +753,7 @@ static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *p
 		return FAILURE;
 	}
 	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
-		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary);
+		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary, max_length);
 	}
 	if (primary->s != NULL) {
 		smart_str_0(primary);
@@ -767,7 +782,7 @@ PHP_FUNCTION(double_metaphone)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (dmet_codes(ZSTR_VAL(input), ZSTR_LEN(input), 1, &primary, &secondary) == FAILURE) {
+	if (dmet_codes(ZSTR_VAL(input), ZSTR_LEN(input), 1, &primary, &secondary, max_length) == FAILURE) {
 		smart_str_free(&primary);
 		smart_str_free(&secondary);
 		RETURN_THROWS();
@@ -782,7 +797,9 @@ PHP_FUNCTION(double_metaphone)
 		slen = ZSTR_LEN(secondary.s);
 	}
 
-	/* max_length <= 0 means "no limit": emit the full untruncated codes. */
+	/* max_length <= 0 means "no limit": emit the full untruncated codes.
+	 * Early-exit in dmet_encode stops once both buffers reach the cap; this
+	 * still trims multi-char emissions that overshot. */
 	if (max_length > 0) {
 		if (plen > (size_t) max_length) {
 			plen = (size_t) max_length;
@@ -829,17 +846,35 @@ PHP_FUNCTION(double_metaphone_match)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), 1, &pa, &sa) == FAILURE
-			|| dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), 2, &pb, &sb) == FAILURE) {
+	if (dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), 1, &pa, &sa, max_length) == FAILURE) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		RETURN_THROWS();
+	}
+
+	/* max_length <= 0 means "no limit": compare the full codes. */
+	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
+
+	/* Empty primary after encode → no usable code (never matches). */
+	if (!(pa.s && ZSTR_LEN(pa.s) > 0)) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		RETURN_LONG(0);
+	}
+	/* Identical operands: primary agrees with itself → strength 2. */
+	if (zend_string_equals(a, b)) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		RETURN_LONG(2);
+	}
+
+	if (dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), 2, &pb, &sb, max_length) == FAILURE) {
 		smart_str_free(&pa);
 		smart_str_free(&sa);
 		smart_str_free(&pb);
 		smart_str_free(&sb);
 		RETURN_THROWS();
 	}
-
-	/* max_length <= 0 means "no limit": compare the full codes. */
-	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
 
 	if (dmet_code_eq(&pa, &pb, cap)) {
 		result = 2;                                       /* primaries agree */

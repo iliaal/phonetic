@@ -220,12 +220,21 @@ PHP_FUNCTION(nysiis_match)
 	ZEND_PARSE_PARAMETERS_END();
 
 	ka = ny_encode(ZSTR_VAL(a), ZSTR_LEN(a), max_length);
+	if (ZSTR_LEN(ka) == 0) {
+		zend_string_release(ka);
+		RETURN_FALSE;
+	}
+	/* Identical operands: non-empty key matches itself. */
+	if (zend_string_equals(a, b)) {
+		zend_string_release(ka);
+		RETURN_TRUE;
+	}
 	kb = ny_encode(ZSTR_VAL(b), ZSTR_LEN(b), max_length);
 
 	/* NYSIIS yields a single key; two names match when the keys are equal.
 	 * A name that produces no key never matches (consistent with the other
 	 * *_match helpers, where an empty/unencodable input is never a homophone). */
-	if (ZSTR_LEN(ka) > 0 && ZSTR_LEN(kb) > 0) {
+	if (ZSTR_LEN(kb) > 0) {
 		matched = zend_string_equals(ka, kb);
 	}
 

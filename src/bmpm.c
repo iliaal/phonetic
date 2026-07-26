@@ -39,7 +39,7 @@
 #include "bmpm_data.h"
 
 #define BMPM_MAX_PHONEMES 20
-#define BMPM_MAX_INPUT 4096
+#define BMPM_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
 /* Public $accuracy constant values (as registered from phonetic.stub.php).
  * They are deliberately disjoint from the name-type values 0/1/2 so a misplaced
@@ -542,7 +542,13 @@ static void bm_alt_from_seg(const char *seg, int l, int nt, alt_t *alt)
 		char lb[BMPM_CAP_LANG_BRACKET + 1];
 		int cln = l - 1 - (o + 1);
 		if (cln < 0) cln = 0;
-		if (cln > BMPM_CAP_LANG_BRACKET) cln = BMPM_CAP_LANG_BRACKET;
+		/* Generator enforces CAP; oversize here means corrupt tables. Fail hard
+		 * like bm_decode_buf_or_fail rather than silently clipping the list. */
+		if (cln > BMPM_CAP_LANG_BRACKET) {
+			zend_error_noreturn(E_CORE_ERROR,
+				"phonetic: generated BMPM language bracket exceeds %d bytes",
+				BMPM_CAP_LANG_BRACKET);
+		}
 		memcpy(lb, seg + o + 1, (size_t) cln);
 		lb[cln] = '\0';
 		alt->t = seg;
@@ -1252,7 +1258,18 @@ static int bm_forced_language(int nt, zend_string *language, uint32_t arg_num, l
 {
 	*forced = LS_NONE;
 	if (language != NULL && ZSTR_LEN(language) > 0) {
-		int idx = bm_lang_index(nt, ZSTR_VAL(language), ZSTR_LEN(language));
+		int idx;
+		/* "any" is a real list entry (index 0) used as the default ruleset
+		 * label, not a forced-language option. Forcing it sets only bit 0 and
+		 * silently drops language-tagged phoneme alternatives — callers who
+		 * mean auto-detect must pass an empty string. */
+		if (ZSTR_LEN(language) == 3
+				&& memcmp(ZSTR_VAL(language), "any", 3) == 0) {
+			zend_argument_value_error(arg_num,
+				"\"any\" is not a forced language; pass an empty string for auto-detect");
+			return FAILURE;
+		}
+		idx = bm_lang_index(nt, ZSTR_VAL(language), ZSTR_LEN(language));
 		if (idx < 0) {
 			/* $language is a raw PHP string. Render a bounded, printable preview:
 			 * a %s of the raw value would truncate at an embedded NUL and an
@@ -1418,6 +1435,15 @@ PHP_FUNCTION(bmpm_match)
 	}
 
 	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
+	if (ral == 0) {
+		efree(ra);
+		RETURN_FALSE;
+	}
+	/* Identical operands: one encode decides (non-empty set intersects itself). */
+	if (zend_string_equals(a, b)) {
+		efree(ra);
+		RETURN_TRUE;
+	}
 	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);

@@ -21,6 +21,10 @@ var_dump(double_metaphone_match("Wisniewski", "Wisniewski", 0));
 // Truncated codes can collide; full-length comparison must not inherit that match.
 var_dump(double_metaphone_match("Westerlund", "Westerberg", 4));
 var_dump(double_metaphone_match("Westerlund", "Westerberg", 0));
+// Negative max_length is unlimited (same as 0).
+var_dump(double_metaphone_match("Catherine", "Kathryn", -1));
+// Another strength-1 pair (primary/alternate cross).
+var_dump(double_metaphone_match("Michael", "Michelle"));
 ?>
 --EXPECT--
 int(2)
@@ -34,3 +38,5 @@ int(0)
 int(2)
 int(2)
 int(0)
+int(2)
+int(1)

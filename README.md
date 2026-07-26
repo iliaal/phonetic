@@ -99,6 +99,8 @@ dm_soundex("");                            // []  (API: empty list, not ["000000
 
 Empty string is the one encode-level departure from Commons Codec: this API returns `[]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle.
 
+**Indexing caveat:** the same `"000000"` string is also the finished code for pure-vowel inputs that *did* match a rule (e.g. `"A"`). Encode equality of `"000000"` does **not** imply a match: `dm_soundex_match("A", "1")` is `false` while both encode to `["000000"]`. When building an inverted index from `dm_soundex()`, skip the `"000000"` key (or use `dm_soundex_match()` at query time).
+
 ### NYSIIS
 
 Single phonetic key (New York State Identification and Intelligence System), tuned for American/English surnames. Reimplementation of the published algorithm; matches Apache Commons Codec's `Nysiis`.
@@ -159,9 +161,9 @@ match_rating_compare("Catherine", "Kathryn");            // true
 
 **Empty / unencodable never match.** Across all helpers, an empty encoding or an input that produces no usable code is not a homophone of anything (including another empty/unencodable input):
 
-- empty string, whitespace-only, or cleaned-away punctuation → `false` / `0`
-- `dm_soundex_match` also ignores the padded `"000000"` sentinel the encoder emits for non-empty unencodable input; both sides must have actually matched a rule
-- `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec; trivial single-character and cleaned-empty inputs still return `false`
+- empty string, whitespace-only, or cleaned-away punctuation → `false` / `0`, except `match_rating_compare` (next bullet)
+- `dm_soundex_match` also ignores the padded `"000000"` sentinel the encoder emits for non-empty unencodable input; both sides must have actually matched a rule. Pure vowels that encode as `"000000"` *do* match each other (`"A"`/`"E"`), but never match unencodable `"000000"` (`"A"`/`"1"`)
+- `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec — so `match_rating_compare(".,-", ".,-")` is `true` even though cleaning removes everything; non-identical cleaned-empty pairs and trivial single-character inputs still return `false`
 
 ## Usage
 
@@ -180,7 +182,11 @@ For indexed lookup, encode once and store the key(s) with each record, then quer
 // Build a phonetic index, then look up by shared code
 $index = [];
 foreach ($records as $id => $name) {
-    foreach (dm_soundex($name) as $code) {   // index every code in the set
+    foreach (dm_soundex($name) as $code) {
+        // Skip the dual-purpose "000000" sentinel (unencodable *and* pure vowels).
+        if ($code === "000000") {
+            continue;
+        }
         $index[$code][] = $id;
     }
 }
@@ -220,8 +226,18 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 
 ## Notes & limitations
 
-- Input is UTF-8. `bmpm()` and `dm_soundex()` fold accented Latin and lowercase both
-  Latin and Cyrillic script before rule matching, so raw `Иванов` encodes correctly.
+- Input is UTF-8. `bmpm()` and `dm_soundex()` fold a Latin accent/ligature set before
+  rule matching. **`bmpm()` also lowercases Cyrillic**, so raw `Иванов` encodes
+  correctly under BMPM. **`dm_soundex()` does not** — its Commons Codec rule table is
+  Latin-oriented; raw Cyrillic typically yields the unencodable sentinel `["000000"]`.
+  Pass romanized forms to DM Soundex.
+- Empty `$language` auto-detects for BMPM. Pass a lowercase language token (e.g.
+  `"russian"`, `"english"`) to force one language. The token `"any"` is **not** a
+  forced language (it is the default ruleset label); forcing it is rejected with
+  `ValueError` — omit the argument for auto-detect.
+- **Unicode normalization:** BMPM matches on code points and drops unmatched ones.
+  NFC and NFD forms of the same visual name (e.g. `Café` vs `Cafe` + combining acute)
+  can produce different token sets. Prefer NFC (or precomposed Latin) input.
 - **Greek-script input is a known limitation:** Greek capitals are not lowercased
   (the algorithm's context-sensitive final-sigma cannot be expressed by a point-wise
   case map), so pass Greek names already lowercased or romanized.

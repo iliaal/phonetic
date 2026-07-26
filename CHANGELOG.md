@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bmpm()` / `bmpm_match()`: forced `$language = "any"` is rejected with
+  `ValueError` (it is the default ruleset label, not a force option). Pass an
+  empty string for auto-detect.
+- `double_metaphone()`: stop encoding once both primary and alternate codes
+  reach `max_length` (still post-truncates multi-char overshoot). Same results
+  for default length 4; less work on long inputs.
+- Shared `PHONETIC_MAX_RULED_INPUT` (4096) for BMPM and DM Soundex caps;
+  generated `DMS_CAP_*` macros size DM replacement alt buffers.
+- Match helpers short-circuit empty first encode and identical operands
+  (behavior-preserving).
+- `bmpm()`: MINIT hard-fails if a language bracket exceeds `BMPM_CAP_LANG_BRACKET`
+  (was silent clip). Generator already enforces the cap.
 - `bmpm()`: lowered `BMPM_MAX_PREFIX_DEPTH` from 16 to 6 (still above realistic
   name nesting; bounds exponential prefix dual-encode fan-out under the 4096-byte
   input cap).
@@ -19,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docs: Cyrillic lowercasing attributed to `bmpm()` only; DM `"000000"` dual
+  meaning and index recipe; MRA identity short-circuit; forced-language `"any"`;
+  NFC vs NFD BMPM note.
+- Tests: multi-code `dm_soundex_match`, dual-sentinel, MRA first3+last3 content,
+  SEPHARDIC/`any` match errors, oracle `parity_golden.phpt`, ü fold comment.
 - `double_metaphone()`: JOSE/SAN `J` branch no longer applies the double-J
   advance (Commons Codec `handleJ` advances by 1 on that arm only).
 - `dm_soundex()`: treat U+0085 (NEXT LINE) as whitespace, matching Java

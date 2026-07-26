@@ -33,7 +33,7 @@
  * bounds the per-character branch work, so untrusted input can't turn
  * dm_soundex into a multi-second CPU sink. The hashed dedup keeps everything
  * up to the cap fast; the cap is the hard backstop. */
-#define DMS_MAX_INPUT 4096
+#define DMS_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
 /* ---------------------------------------------------------------------- */
 /* UTF-8 helpers (decode/encode/lowercase live in phonetic_utf8.h)        */
@@ -388,7 +388,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		int best_cplen = 0;
 		const char *field;
 		int at_start;
-		char alts[8][4];
+		char alts[DMS_CAP_CODE_ALTS][DMS_CAP_CODE_LEN + 1];
 		int nalts;
 		int force;
 
@@ -439,13 +439,13 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 				if (*p == '|' || *p == '\0') {
 					alts[nalts][wl] = '\0';
 					nalts++;
-					if (*p == '\0' || nalts >= 8) {
+					if (*p == '\0' || nalts >= DMS_CAP_CODE_ALTS) {
 						break;
 					}
 					wl = 0;
 					p++;
 				} else {
-					if (wl < 3) {
+					if (wl < DMS_CAP_CODE_LEN) {
 						alts[nalts][wl++] = *p;
 					}
 					p++;
@@ -568,9 +568,18 @@ PHP_FUNCTION(dm_soundex_match)
 	 * both sides to have actually coded keeps two unencodable inputs from
 	 * comparing as homophones, consistent with the other *_match helpers. */
 	ca = dms_codes(a, &sa);
+	if (!ca) {
+		dms_set_free(&sa);
+		RETURN_FALSE;
+	}
+	/* Identical operands: one coded encode is enough (set intersects itself). */
+	if (zend_string_equals(a, b)) {
+		dms_set_free(&sa);
+		RETURN_TRUE;
+	}
 	cb = dms_codes(b, &sb);
 
-	if (ca && cb) {
+	if (cb) {
 		for (i = 0; i < sa.n; i++) {
 			if (dms_set_find(&sb, sa.b[i].code) >= 0) {
 				matched = 1;
