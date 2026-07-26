@@ -586,17 +586,36 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 			int ns = 0, start = 0;
 			for (i = 0; i <= blen; i++) {
 				if (i == blen || body[i] == '|') {
-					if (ns < seg_cap) { segs[ns].s = start; segs[ns].l = i - start; ns++; }
+					/* Generator enforces CAP; oversize means corrupt tables.
+					 * Fail hard like language brackets rather than drop alts. */
+					if (ns >= seg_cap) {
+						zend_error_noreturn(E_CORE_ERROR,
+							"phonetic: generated BMPM phoneme alternatives exceed %d",
+							BMPM_CAP_PHONEME_ALTS);
+					}
+					segs[ns].s = start;
+					segs[ns].l = i - start;
+					ns++;
 					start = i + 1;
 				}
 			}
 			while (ns > 0 && segs[ns - 1].l == 0) ns--;
-			for (i = 0; i < ns && na < cap; i++) {
+			for (i = 0; i < ns; i++) {
+				if (na >= cap) {
+					zend_error_noreturn(E_CORE_ERROR,
+						"phonetic: generated BMPM phoneme alternatives exceed %d",
+						BMPM_CAP_PHONEME_ALTS);
+				}
 				bm_alt_from_seg(body + segs[i].s, segs[i].l, nt, &alts[na++]);
 			}
 		}
 
-		if (na < cap && (body[0] == '|' || (blen > 0 && body[blen - 1] == '|'))) {
+		if (body[0] == '|' || (blen > 0 && body[blen - 1] == '|')) {
+			if (na >= cap) {
+				zend_error_noreturn(E_CORE_ERROR,
+					"phonetic: generated BMPM phoneme alternatives exceed %d",
+					BMPM_CAP_PHONEME_ALTS);
+			}
 			alts[na].t = ""; alts[na].tn = 0; alts[na].langs = LS_ANY;
 			na++;
 		}

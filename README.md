@@ -190,7 +190,18 @@ foreach ($records as $id => $name) {
         $index[$code][] = $id;
     }
 }
-$hits = $index[dm_soundex("Moskovitz")[0]] ?? [];
+// Query every code in the set (not only [0]): branching names like Auerbach
+// share a secondary code with Oerback that the first code alone would miss.
+$hits = [];
+foreach (dm_soundex("Moskovitz") as $code) {
+    if ($code === "000000") {
+        continue;
+    }
+    foreach ($index[$code] ?? [] as $id) {
+        $hits[$id] = true;
+    }
+}
+$hits = array_keys($hits);
 
 // Splitting a BMPM token string into its individual codes. Prefixed names emit
 // grouped output with parentheses (e.g. bmpm("van Smith") => "(zmit)-(...)"), so

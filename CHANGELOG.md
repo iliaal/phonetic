@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bmpm()` MINIT: oversize phoneme `|` alternative lists hard-fail with
+  `E_CORE_ERROR` (same policy as language brackets; generator already enforces).
+- Docs: DM index example queries every non-`000000` code (not only `[0]`).
+- `scripts/regen_arginfo.sh`: prefers `$HOME/php-install-PHP-8.1/bin/php` when
+  `PHP_BIN` is unset; documents tokenizer/gen_stub requirements.
 - `bmpm()` / `bmpm_match()`: forced `$language = "any"` is rejected with
   `ValueError` (it is the default ruleset label, not a force option). Pass an
   empty string for auto-detect.
