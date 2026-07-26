@@ -10,7 +10,8 @@ ARG_ENABLE("phonetic-dev", "phonetic: treat compiler warnings as errors (/WX)", 
 
 if (PHP_PHONETIC != "no") {
 	// Mirror config.m4: require PHP 8.1+ (composer.json / README contract).
-	if (PHP_VERSION_ID < 80100) {
+	// Windows phpize exposes PHP_VERSION / PHP_MINOR_VERSION, not PHP_VERSION_ID.
+	if (PHP_VERSION < 8 || (PHP_VERSION == 8 && PHP_MINOR_VERSION < 1)) {
 		ERROR("phonetic requires PHP 8.1.0 or later");
 	}
 	EXTENSION("phonetic", "phonetic.c");
