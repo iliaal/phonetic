@@ -7,78 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- CI: PIE smoke pins a false `bmpm_match` and Double Metaphone match strengths;
-  Windows jobs assert `php_phonetic.dll` was produced after the builder step.
-- Tests: cleaned-empty identity match pins; multiword concat non-match;
-  SEPHARDIC non-identity true pair; forced-language case-sensitivity.
-- `scripts/check_arginfo.php` locks `PH_BMPM_*` accuracy ints to the stub;
-  smoke no longer hardcodes the version string; regen_arginfo docs fixed.
-- `bmpm()` MINIT: language lists exceeding `BMPM_CAP_LANGUAGES` hard-fail;
-  oversize phoneme `|` alternative lists hard-fail with `E_CORE_ERROR` (same
-  policy as language brackets; generator already enforces).
-- `match_rating_compare()`: skip second encode when the first cleans to empty.
-- `config.w32`: require PHP 8.1+ (parity with `config.m4`).
-- Tests: match-helper oracle pins; forced-language `bmpm_match` flip;
-  identical unencodable DM match; final-J space match; `John Smith` multiword.
-- Docs: forced-language API note; Double Metaphone unmapped non-ASCII fold;
-  LICENSE Section 2 names generated `bmpm_data.h` embedding.
-- Docs: DM index example queries every non-`000000` code (not only `[0]`).
-- `scripts/regen_arginfo.sh`: prefers `$HOME/php-install-PHP-8.1/bin/php` when
-  `PHP_BIN` is unset; documents tokenizer/gen_stub requirements.
-- `bmpm()` / `bmpm_match()`: forced `$language = "any"` is rejected with
-  `ValueError` (it is the default ruleset label, not a force option). Pass an
-  empty string for auto-detect.
-- `double_metaphone()`: stop encoding once both primary and alternate codes
-  reach `max_length` (still post-truncates multi-char overshoot). Same results
-  for default length 4; less work on long inputs.
-- Shared `PHONETIC_MAX_RULED_INPUT` (4096) for BMPM and DM Soundex caps;
-  generated `DMS_CAP_*` macros size DM replacement alt buffers.
-- Match helpers short-circuit an unencodable first operand and identical
-  operands. `double_metaphone_match()` treats a code as unencodable only when
-  both the primary and the alternate are empty, so an alternate-only code such
-  as `"-EW"` (`""`/`"F"`) still crosses at strength `1`, in either argument
-  order.
-- `bmpm()`: MINIT hard-fails if a language bracket exceeds `BMPM_CAP_LANG_BRACKET`
-  (was silent clip). Generator already enforces the cap.
-- `bmpm()`: lowered `BMPM_MAX_PREFIX_DEPTH` from 16 to 6 (still above realistic
-  name nesting; bounds exponential prefix dual-encode fan-out under the 4096-byte
-  input cap).
-- Internal BMPM rule-type enum tokens renamed to `BMPM_RT_APPROX` /
-  `BMPM_RT_EXACT` so they cannot collide with public accuracy constants.
-  Generated stack caps (`BMPM_CAP_*`) are shared between the generator and
-  `src/bmpm.c`.
-
-### Fixed
-
-- Docs: Cyrillic lowercasing attributed to `bmpm()` only; DM `"000000"` dual
-  meaning and index recipe; MRA identity short-circuit; forced-language `"any"`;
-  NFC vs NFD BMPM note.
-- Tests: multi-code `dm_soundex_match`, dual-sentinel, MRA first3+last3 content,
-  SEPHARDIC/`any` match errors, oracle `parity_golden.phpt`, ü fold comment.
-- `double_metaphone()`: JOSE/SAN `J` branch no longer applies the double-J
-  advance (Commons Codec `handleJ` advances by 1 on that arm only).
-- `dm_soundex()`: U+0085 (NEXT LINE) is *not* whitespace. Java's
-  `Character.isWhitespace` covers exactly 25 code points and U+0085 is not one
-  of them (unlike Python's `str.isspace()` or .NET's `char.IsWhiteSpace`), so
-  Commons Codec's cleanup keeps it. `tests/dm_soundex_whitespace.phpt` pins the
-  whole set against the oracle.
-- `bmpm()` MINIT: zero-initialize ruleset/language indexes so a mid-build abort
-  cannot free garbage pointers on unload.
-- `bmpm()`: overflow-safe allocation for phoneme-set growth and prefix pair
-  buffers; final-rule merge appends and sorts once instead of the O(R²)
-  insert-sort (same comparator order). Duplicate lookup is a hashed index only
-  when the incoming phoneme texts are wide enough to pay for it
-  (`BM_FINAL_HASH_MIN_TEXT`); ordinary names use a linear scan, which is
-  cheaper than one `zend_string` per distinct phoneme.
-- `bmpm()`: the BMPM rule-matching inner loops compare code points inline again.
-  Routing 1-3 element compares through `memcmp()` cost 5-6% of encode time on
-  x86-64 and ARM64 with no upside.
-- Docs/tests: empty/unencodable match contracts, BMPM validation and accuracy
-  values, `bmpm_match` accuracy forwarding, and word-final `J` alternate space.
-
-## [0.4.0] - 2026-07-25
+## [0.4.0] - 2026-07-26
 
 ### Changed
 
@@ -89,16 +18,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation instead of silently running as a name type. Code that uses the
   constant names is unaffected; only code hard-coding the numeric values `1`/`2`
   for the `$accuracy` argument needs updating.
-- Version string is `0.4.0`.
+- `bmpm()` / `bmpm_match()`: forced `$language = "any"` now raises `ValueError`;
+  it is the default ruleset label. Pass an empty string for auto-detect.
+- `double_metaphone()`: stops encoding once both codes reach `max_length`. Same
+  results, less work on long inputs.
+- Match helpers skip the second encode when the first operand is unencodable or
+  the two operands are identical.
+- `bmpm()`: `BMPM_MAX_PREFIX_DEPTH` lowered from 16 to 6, bounding the prefix
+  dual-encode fan-out. Still above realistic name nesting.
+- `bmpm()` MINIT hard-fails on an oversize generated language list, language
+  bracket, or phoneme alternative list instead of silently clipping it.
+- Internal BMPM rule-type tokens renamed to `BMPM_RT_APPROX` / `BMPM_RT_EXACT`
+  so they cannot collide with the public accuracy constants.
+- Shared `PHONETIC_MAX_RULED_INPUT` (4096) for BMPM and DM Soundex caps;
+  generated `DMS_CAP_*` macros size DM replacement alt buffers.
+- `match_rating_compare()`: skip second encode when the first cleans to empty.
+- `config.w32`: require PHP 8.1+ (parity with `config.m4`).
+- Docs: forced-language API note; Double Metaphone unmapped non-ASCII fold;
+  DM index example queries every non-`000000` code; LICENSE Section 2.
+- CI: PIE smoke pins a false `bmpm_match` and Double Metaphone match strengths;
+  Windows jobs assert `php_phonetic.dll` was produced after the builder step.
+- `scripts/check_arginfo.php` locks `PH_BMPM_*` accuracy ints to the stub;
+  smoke no longer hardcodes the version string; regen_arginfo docs fixed.
+- `scripts/regen_arginfo.sh`: prefers `$HOME/php-install-PHP-8.1/bin/php` when
+  `PHP_BIN` is unset; documents tokenizer/gen_stub requirements.
 
 ### Fixed
 
+- `double_metaphone()`: JOSE/SAN `J` branch no longer applies the double-J
+  advance (Commons Codec `handleJ` advances by 1 on that arm only).
+- `double_metaphone_match()`: a code counts as unencodable only when both the
+  primary and the alternate are empty, so `"-EW"` (`""`/`"F"`) still crosses at
+  strength `1` in either argument order.
+- `dm_soundex()`: U+0085 is kept, not stripped. Java's `Character.isWhitespace`
+  excludes it, so Commons Codec keeps it too.
+- `bmpm()` MINIT: zero-initialize ruleset/language indexes so a mid-build abort
+  cannot free garbage pointers on unload.
+- `bmpm()`: overflow-safe allocation for phoneme-set growth and prefix pair
+  buffers.
+- `bmpm()`: the final-rule merge sorts once instead of an O(R²) insert-sort, and
+  hashes duplicates only when the phoneme texts are wide enough to pay for it.
+- `bmpm()`: rule-matching inner loops compare code points inline again; routing
+  1-3 element compares through `memcmp()` cost 5-6% of encode time.
 - `nysiis()`: corrected a source comment that claimed parity with Commons Codec's
-  `SoundexUtils.clean`; the ASCII-only cleaning is a deliberate, documented
-  restriction.
-- `scripts/gen_bmpm_data.php`: `src/bmpm_data.h` is now written to a temp file and
-  renamed into place, so an interrupted regeneration can't leave a truncated
-  header.
+  `SoundexUtils.clean`; the ASCII-only cleaning is a deliberate restriction.
+- `scripts/gen_bmpm_data.php`: `src/bmpm_data.h` is written to a temp file and
+  renamed into place, so an interrupted run can't leave a truncated header.
+- Docs: Cyrillic lowercasing is `bmpm()`-only; DM `"000000"` dual meaning; MRA
+  identity short-circuit; forced-language `"any"`; NFC vs NFD.
+- Docs/tests: empty/unencodable match contracts, BMPM validation and accuracy
+  values, `bmpm_match` accuracy forwarding, and word-final `J` alternate space.
+- Tests: match-helper oracle pins, cleaned-empty identity pins, multi-code
+  `dm_soundex_match`, dual-sentinel, MRA first3+last3, SEPHARDIC/`any` errors.
 
 ## [0.3.0] - 2026-07-09
 

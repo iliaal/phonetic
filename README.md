@@ -167,6 +167,7 @@ match_rating_compare("Catherine", "Kathryn");            // true
 - empty string, whitespace-only, or cleaned-away punctuation → `false` / `0`, except `match_rating_compare` (next bullet)
 - `dm_soundex_match` also ignores the padded `"000000"` sentinel the encoder emits for non-empty unencodable input; both sides must have actually matched a rule. Pure vowels that encode as `"000000"` *do* match each other (`"A"`/`"E"`), but never match unencodable `"000000"` (`"A"`/`"1"`)
 - `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec — so `match_rating_compare(".,-", ".,-")` is `true` even though cleaning removes everything; non-identical cleaned-empty pairs and trivial single-character inputs still return `false`
+- `double_metaphone_match` counts a name as unencodable only when *both* its codes are empty. A word-final `W` after a non-initial vowel gives an empty primary with a live alternate (`"-EW"` → `""`/`"F"`), which still crosses at strength `1`, in either argument order
 
 ## Usage
 
