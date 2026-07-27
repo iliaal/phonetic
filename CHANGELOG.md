@@ -35,8 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for default length 4; less work on long inputs.
 - Shared `PHONETIC_MAX_RULED_INPUT` (4096) for BMPM and DM Soundex caps;
   generated `DMS_CAP_*` macros size DM replacement alt buffers.
-- Match helpers short-circuit empty first encode and identical operands
-  (behavior-preserving).
+- Match helpers short-circuit an unencodable first operand and identical
+  operands. `double_metaphone_match()` treats a code as unencodable only when
+  both the primary and the alternate are empty, so an alternate-only code such
+  as `"-EW"` (`""`/`"F"`) still crosses at strength `1`, in either argument
+  order.
 - `bmpm()`: MINIT hard-fails if a language bracket exceeds `BMPM_CAP_LANG_BRACKET`
   (was silent clip). Generator already enforces the cap.
 - `bmpm()`: lowered `BMPM_MAX_PREFIX_DEPTH` from 16 to 6 (still above realistic
@@ -56,13 +59,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SEPHARDIC/`any` match errors, oracle `parity_golden.phpt`, ü fold comment.
 - `double_metaphone()`: JOSE/SAN `J` branch no longer applies the double-J
   advance (Commons Codec `handleJ` advances by 1 on that arm only).
-- `dm_soundex()`: treat U+0085 (NEXT LINE) as whitespace, matching Java
-  `Character.isWhitespace`.
+- `dm_soundex()`: U+0085 (NEXT LINE) is *not* whitespace. Java's
+  `Character.isWhitespace` covers exactly 25 code points and U+0085 is not one
+  of them (unlike Python's `str.isspace()` or .NET's `char.IsWhiteSpace`), so
+  Commons Codec's cleanup keeps it. `tests/dm_soundex_whitespace.phpt` pins the
+  whole set against the oracle.
 - `bmpm()` MINIT: zero-initialize ruleset/language indexes so a mid-build abort
   cannot free garbage pointers on unload.
 - `bmpm()`: overflow-safe allocation for phoneme-set growth and prefix pair
-  buffers; final-rule merge uses a hash map + one sort instead of O(R²)
-  insert-sort (same comparator order).
+  buffers; final-rule merge appends and sorts once instead of the O(R²)
+  insert-sort (same comparator order). Duplicate lookup is a hashed index only
+  when the incoming phoneme texts are wide enough to pay for it
+  (`BM_FINAL_HASH_MIN_TEXT`); ordinary names use a linear scan, which is
+  cheaper than one `zend_string` per distinct phoneme.
+- `bmpm()`: the BMPM rule-matching inner loops compare code points inline again.
+  Routing 1-3 element compares through `memcmp()` cost 5-6% of encode time on
+  x86-64 and ARM64 with no upside.
 - Docs/tests: empty/unencodable match contracts, BMPM validation and accuracy
   values, `bmpm_match` accuracy forwarding, and word-final `J` alternate space.
 

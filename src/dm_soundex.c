@@ -53,13 +53,15 @@ static int dms_u8_cplen(const char *s, size_t len)
 }
 
 /* Java Character.isWhitespace: ASCII control whitespace plus the Unicode space
- * separators, excluding the no-break spaces. */
+ * separators, excluding the no-break spaces. The full set is exactly these 25
+ * code points — notably U+0085 (NEXT LINE) is *not* among them, unlike Python's
+ * str.isspace() or .NET's char.IsWhiteSpace, so Commons Codec's cleanup keeps
+ * it and so must we. */
 static int dms_is_ws(uint32_t cp)
 {
 	if (cp >= 0x09 && cp <= 0x0D) return 1;
 	if (cp >= 0x1C && cp <= 0x1F) return 1;
 	if (cp == 0x20) return 1;
-	if (cp == 0x85) return 1;                       /* NEL; Java Character.isWhitespace */
 	if (cp == 0x1680) return 1;
 	if (cp >= 0x2000 && cp <= 0x2006) return 1;     /* 0x2007 (figure space) excluded */
 	if (cp >= 0x2008 && cp <= 0x200A) return 1;

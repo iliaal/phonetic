@@ -39,6 +39,15 @@
 #include "bmpm_data.h"
 
 #define BMPM_MAX_PHONEMES 20
+
+/* bm_apply_final's linear dedupe compares up to `result.n` texts per insert, and
+ * result.n is bounded by (incoming phonemes x BMPM_MAX_PHONEMES), so
+ * `pb->n * widest text` tracks that scan's worst-case byte cost. Past this bound
+ * a hashed index is cheaper despite its zend_string per distinct phoneme.
+ * Measured: "Smith" 8, "Kowalski" 24, three-word Ashkenazi ~500, a 96-byte name
+ * ~1700 -- the two regimes are orders of magnitude apart. */
+#define BM_FINAL_HASH_MIN_WORK 128
+
 #define BMPM_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
 /* Public $accuracy constant values (as registered from phonetic.stub.php).
@@ -206,20 +215,26 @@ static int bm_classmember(const uint32_t *cls, int cn, uint32_t c)
 
 static int bm_seqeq(const uint32_t *a, int an, const uint32_t *b, int bn)
 {
+	int i;
 	if (an != bn) return 0;
-	return an == 0 || memcmp(a, b, (size_t) an * sizeof(uint32_t)) == 0;
+	for (i = 0; i < an; i++) if (a[i] != b[i]) return 0;
+	return 1;
 }
 
 static int bm_prefixeq(const uint32_t *seg, int sn, const uint32_t *p, int pn)
 {
+	int i;
 	if (pn > sn) return 0;
-	return pn == 0 || memcmp(seg, p, (size_t) pn * sizeof(uint32_t)) == 0;
+	for (i = 0; i < pn; i++) if (seg[i] != p[i]) return 0;
+	return 1;
 }
 
 static int bm_suffixeq(const uint32_t *seg, int sn, const uint32_t *p, int pn)
 {
+	int i;
 	if (pn > sn) return 0;
-	return pn == 0 || memcmp(seg + sn - pn, p, (size_t) pn * sizeof(uint32_t)) == 0;
+	for (i = 0; i < pn; i++) if (seg[sn - pn + i] != p[i]) return 0;
+	return 1;
 }
 
 static int bm_substr_find(const uint32_t *seg, int sn, const uint32_t *p, int pn)
@@ -227,7 +242,9 @@ static int bm_substr_find(const uint32_t *seg, int sn, const uint32_t *p, int pn
 	int s;
 	if (pn == 0) return 1;
 	for (s = 0; s + pn <= sn; s++) {
-		if (memcmp(seg + s, p, (size_t) pn * sizeof(uint32_t)) == 0) return 1;
+		int k, ok = 1;
+		for (k = 0; k < pn; k++) if (seg[s + k] != p[k]) { ok = 0; break; }
+		if (ok) return 1;
 	}
 	return 0;
 }
@@ -795,11 +812,29 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 	}
 
 	pb_init(&result);
-	/* Text → index in result for O(1) language merges. Final sort restores
-	 * Rule.Phoneme.COMPARATOR order once (was O(R²) insert-sort per merge). */
+	/* Duplicate phonemes collapse by text with their language sets unioned; the
+	 * final sort restores Rule.Phoneme.COMPARATOR order once.
+	 *
+	 * Two lookup strategies, because the two workloads are far apart. Ordinary
+	 * names yield a handful of phonemes a few bytes long, where a linear scan
+	 * beats one zend_string allocation per distinct text. Long inputs yield
+	 * phoneme texts in the kilobytes, where repeated full-text compares dominate
+	 * and the hashed index wins by orders of magnitude. Estimate the linear
+	 * scan's cost from the incoming set and decide once per call. */
 	{
 		HashTable seen;
-		zend_hash_init(&seen, 32, NULL, NULL, 0);
+		size_t widest = 0;
+		int hashed;
+
+		for (pi = 0; pi < pb->n; pi++) {
+			if (pb->a[pi].tn > widest) {
+				widest = pb->a[pi].tn;
+			}
+		}
+		hashed = pb->n * widest > BM_FINAL_HASH_MIN_WORK;
+		if (hashed) {
+			zend_hash_init(&seen, 32, NULL, NULL, 0);
+		}
 
 		for (pi = 0; pi < pb->n; pi++) {
 			phon_t *P = &pb->a[pi];
@@ -853,13 +888,28 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 
 			for (si = 0; si < sub.n; si++) {
 				phon_t *np = &sub.a[si];
-				zval *existing = zend_hash_str_find(&seen, PHON_T(np), np->tn);
-				if (existing) {
-					size_t k = (size_t) Z_LVAL_P(existing);
-					result.a[k].langs = ls_merge(result.a[k].langs, np->langs);
+				size_t found = result.n;          /* == result.n means "not present" */
+
+				if (hashed) {
+					zval *existing = zend_hash_str_find(&seen, PHON_T(np), np->tn);
+					if (existing) {
+						found = (size_t) Z_LVAL_P(existing);
+					}
+				} else {
+					size_t k;
+					for (k = 0; k < result.n; k++) {
+						if (result.a[k].tn == np->tn
+								&& memcmp(PHON_T(&result.a[k]), PHON_T(np), np->tn) == 0) {
+							found = k;
+							break;
+						}
+					}
+				}
+
+				if (found < result.n) {
+					result.a[found].langs = ls_merge(result.a[found].langs, np->langs);
 				} else {
 					size_t idx = result.n;
-					zval zidx;
 					pb_reserve(&result, result.n + 1);
 					/* Move the whole phoneme (heap pointer or inline bytes) into
 					 * the result, then null the source's heap pointer so pb_free
@@ -867,14 +917,19 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 					result.a[idx] = *np;
 					np->t = NULL;
 					result.n++;
-					ZVAL_LONG(&zidx, (zend_long) idx);
-					zend_hash_str_update(&seen, PHON_T(&result.a[idx]), result.a[idx].tn, &zidx);
+					if (hashed) {
+						zval zidx;
+						ZVAL_LONG(&zidx, (zend_long) idx);
+						zend_hash_str_update(&seen, PHON_T(&result.a[idx]), result.a[idx].tn, &zidx);
+					}
 				}
 			}
 			pb_free(&sub);
 		}
 
-		zend_hash_destroy(&seen);
+		if (hashed) {
+			zend_hash_destroy(&seen);
+		}
 	}
 
 	if (result.n > 1) {
