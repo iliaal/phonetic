@@ -842,6 +842,7 @@ PHP_FUNCTION(double_metaphone_match)
 	zend_long max_length = 4;
 	smart_str pa = {0}, sa = {0}, pb = {0}, sb = {0};
 	size_t cap;
+	int pa_set, sa_set;
 	int result = 0;
 
 	ZEND_PARSE_PARAMETERS_START(2, 3)
@@ -860,25 +861,23 @@ PHP_FUNCTION(double_metaphone_match)
 	/* max_length <= 0 means "no limit": compare the full codes. */
 	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
 
-	{
-		int pa_set = pa.s != NULL && ZSTR_LEN(pa.s) > 0;
-		int sa_set = sa.s != NULL && ZSTR_LEN(sa.s) > 0;
+	pa_set = pa.s != NULL && ZSTR_LEN(pa.s) > 0;
+	sa_set = sa.s != NULL && ZSTR_LEN(sa.s) > 0;
 
-		/* No usable code at all → never matches. Testing only the primary would
-		 * drop the strength-1 crossing of an alternate-only code ("-EW" encodes
-		 * to ""/"F") and make the helper answer differently per argument order. */
-		if (!pa_set && !sa_set) {
-			smart_str_free(&pa);
-			smart_str_free(&sa);
-			RETURN_LONG(0);
-		}
-		/* Identical operands: the primary agrees with itself where it exists,
-		 * otherwise the alternate is the only code that can cross. */
-		if (zend_string_equals(a, b)) {
-			smart_str_free(&pa);
-			smart_str_free(&sa);
-			RETURN_LONG(pa_set ? 2 : 1);
-		}
+	/* No usable code at all → never matches. Testing only the primary would drop
+	 * the strength-1 crossing of an alternate-only code ("-EW" encodes to ""/"F")
+	 * and make the helper answer differently per argument order. */
+	if (!pa_set && !sa_set) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		RETURN_LONG(0);
+	}
+	/* Identical operands: the primary agrees with itself where it exists,
+	 * otherwise the alternate is the only code that can cross. */
+	if (zend_string_equals(a, b)) {
+		smart_str_free(&pa);
+		smart_str_free(&sa);
+		RETURN_LONG(pa_set ? 2 : 1);
 	}
 
 	if (dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), 2, &pb, &sb, max_length) == FAILURE) {

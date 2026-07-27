@@ -888,26 +888,26 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 
 			for (si = 0; si < sub.n; si++) {
 				phon_t *np = &sub.a[si];
-				size_t found = result.n;          /* == result.n means "not present" */
+				phon_t *hit = NULL;
 
 				if (hashed) {
 					zval *existing = zend_hash_str_find(&seen, PHON_T(np), np->tn);
 					if (existing) {
-						found = (size_t) Z_LVAL_P(existing);
+						hit = &result.a[Z_LVAL_P(existing)];
 					}
 				} else {
 					size_t k;
 					for (k = 0; k < result.n; k++) {
 						if (result.a[k].tn == np->tn
 								&& memcmp(PHON_T(&result.a[k]), PHON_T(np), np->tn) == 0) {
-							found = k;
+							hit = &result.a[k];
 							break;
 						}
 					}
 				}
 
-				if (found < result.n) {
-					result.a[found].langs = ls_merge(result.a[found].langs, np->langs);
+				if (hit) {
+					hit->langs = ls_merge(hit->langs, np->langs);
 				} else {
 					size_t idx = result.n;
 					pb_reserve(&result, result.n + 1);
