@@ -357,7 +357,7 @@ jobs:
       # build+tests in one step. Assert the DLL was produced so a total
       # package failure cannot look green. Residual: all-SKIP with a present
       # DLL still depends on the builder's test runner exit policy.
-      - uses: php/php-windows-builder/extension@e03e5d39879adaeb61ed2225f0f4eae7db8c1df8 # 1.8.1
+      - uses: php/php-windows-builder/extension@29352c0ef9e8ce65264ea9e287881a6f7758a953 # 1.9.0
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
