@@ -78,6 +78,46 @@ const CAP_DM_CODE_ALTS    = 8;    /* dms_encode: alts[8][4] */
 const CAP_DM_CODE_LEN     = 3;    /* dms_encode: alts[.][4] NUL-terminated */
 const CAP_DM_FOLD_FROM    = 4;    /* dms_cleanup: char tmp[4] comparison window */
 
+/* bmpm_tok_sep() in src/bmpm.c splits bmpm() output into match tokens on
+ * '|', '(', ')' and '-'. That is only sound while no decoded phoneme token
+ * contains those characters, so validate each rule's phoneme expression here,
+ * mirroring bm_parse_phoneme_expr()/bm_alt_from_seg(): outer parentheses are
+ * grammar, a single trailing [bracket] is a language list, everything left is
+ * token text that must be separator-free. Language lists must stay limited to
+ * the letters and '+' separators bm_parse_lang_list() understands. */
+function check_phoneme_tokens(string $phoneme, string $where): void
+{
+    if (str_contains($phoneme, '-')) {
+        fail("phoneme expression contains '-' in $where: $phoneme");
+    }
+    $body = $phoneme;
+    if (strlen($body) >= 2 && $body[0] === '(' && substr($body, -1) === ')') {
+        $body = substr($body, 1, -1);
+        if (str_contains($body, '(') || str_contains($body, ')')) {
+            fail("nested parentheses in phoneme expression in $where: $phoneme");
+        }
+    } elseif (preg_match('/[()]/', $body)) {
+        fail("unbalanced parentheses in phoneme expression in $where: $phoneme");
+    }
+    foreach (explode('|', $body) as $seg) {
+        /* Mirror bm_alt_from_seg: a language bracket exists only when the FIRST
+         * '[' is paired with a final ']'; anything else is literal token text
+         * and its brackets are caught by the token check below. */
+        $token = $seg;
+        $o = strpos($seg, '[');
+        if ($o !== false && str_ends_with($seg, ']')) {
+            $langlist = substr($seg, $o + 1, -1);
+            $token = substr($seg, 0, $o);
+            if (!preg_match('/^[A-Za-z+]*$/', $langlist)) {
+                fail("phoneme language list has unexpected characters in $where: $phoneme");
+            }
+        }
+        if (preg_match('/[|()\[\]]/', $token)) {
+            fail("phoneme token contains an output separator in $where: $phoneme");
+        }
+    }
+}
+
 function check_bm_rule(array $r, string $where): void
 {
     [$pattern, $lcon, $rcon, $phoneme] = $r;
@@ -100,6 +140,7 @@ function check_bm_rule(array $r, string $where): void
             }
         }
     }
+    check_phoneme_tokens($phoneme, $where);
 }
 
 /* Strip at most one leading and one trailing double quote (matches the

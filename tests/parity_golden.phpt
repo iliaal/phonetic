@@ -1,5 +1,5 @@
 --TEST--
-Oracle golden.tsv parity matrix (Commons Codec 1.17.1, 550 rows)
+Oracle golden.tsv parity matrix (Commons Codec 1.17.1, 627 rows)
 --EXTENSIONS--
 phonetic
 --SKIPIF--
@@ -35,4 +35,4 @@ if ($exit !== 0) {
 }
 ?>
 --EXPECT--
-parity: 550 checked, 0 mismatch(es)
+parity: 627 checked, 0 mismatch(es)

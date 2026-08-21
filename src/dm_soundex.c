@@ -246,9 +246,15 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 		br->code[br->len] = '\0';
 	}
 
-	/* lastReplacement is always updated, even when not appended. */
-	memcpy(br->lastrep, rep, replen + 1 <= sizeof(br->lastrep) ? replen + 1 : sizeof(br->lastrep));
-	br->lastrep[sizeof(br->lastrep) - 1] = '\0';
+	/* lastReplacement is always updated, even when not appended. The guard
+	 * above keeps the copy within lastrep's fixed size; like the split loop,
+	 * it fails hard instead of silently truncating a corrupt replacement. */
+	if (replen > sizeof(br->lastrep) - 1) {
+		zend_error_noreturn(E_CORE_ERROR,
+			"phonetic: DM rule code alternative exceeds %d chars",
+			(int) (sizeof(br->lastrep) - 1));
+	}
+	memcpy(br->lastrep, rep, replen + 1);
 	br->last_null = 0;
 }
 
@@ -432,7 +438,10 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 			field = dms_is_vowel(nx) ? best->before_vowel : best->default_code;
 		}
 
-		/* Split the replacement field on '|' into branch alternatives. */
+		/* Split the replacement field on '|' into branch alternatives. Both
+		 * caps are generator-enforced; over-cap data means a corrupt or
+		 * hand-edited table, so fail hard like the BMPM engine rather than
+		 * silently clipping the code set. */
 		nalts = 0;
 		{
 			const char *p = field;
@@ -441,15 +450,23 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 				if (*p == '|' || *p == '\0') {
 					alts[nalts][wl] = '\0';
 					nalts++;
-					if (*p == '\0' || nalts >= DMS_CAP_CODE_ALTS) {
+					if (*p == '\0') {
 						break;
+					}
+					if (nalts >= DMS_CAP_CODE_ALTS) {
+						zend_error_noreturn(E_CORE_ERROR,
+							"phonetic: DM rule code field exceeds %d alternatives",
+							DMS_CAP_CODE_ALTS);
 					}
 					wl = 0;
 					p++;
 				} else {
-					if (wl < DMS_CAP_CODE_LEN) {
-						alts[nalts][wl++] = *p;
+					if (wl >= DMS_CAP_CODE_LEN) {
+						zend_error_noreturn(E_CORE_ERROR,
+							"phonetic: DM rule code alternative exceeds %d chars",
+							DMS_CAP_CODE_LEN);
 					}
+					alts[nalts][wl++] = *p;
 					p++;
 				}
 			}
