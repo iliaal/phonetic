@@ -270,6 +270,10 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
   input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
   the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.
+- Beyond the length cap, those four functions also fail hard with a fatal error
+  (not a catchable `ValueError`) when a crafted input *within* the cap would
+  produce output or CPU disproportionate to its size. Real names never approach
+  these per-encode bounds.
 
 Input-length policy by function (the cap is per-argument, so both operands of a
 match/compare helper are checked):

@@ -7,20 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-30
+
 ### Security
 
-- `bmpm()` / `bmpm_match()`: bound each call's phoneme set, phoneme-text output,
-  phoneme-text copying, and language-guess scanning, and fail hard when a single
-  encode exceeds them. A crafted input at or below the 4096-byte cap could
-  otherwise drive the three-pass rule pipeline and the GENERIC prefix fan-out
-  into thousands of phonemes, tens to hundreds of MB of output, and seconds to
-  minutes of CPU disproportionate to its size (CWE-400). Real names stay orders
-  of magnitude under every bound, so only pathological input is rejected.
+- `bmpm()` / `bmpm_match()`: cap each encode's phoneme set, output, text copying,
+  and language-guess work, failing hard on crafted super-linear input (CWE-400).
 - `dm_soundex()` / `dm_soundex_match()`: cap the live branch set at 128 distinct
-  codes. Fork-alternation input (repeated `c`/`j`/`rs` and the Polish/Romanian
-  ogonek and cedilla letters) could otherwise fork the set to ~1700 codes and
-  burn hundreds of milliseconds of CPU on a 4 KB input (CWE-400). Real names
-  fork to single digits.
+  codes, so fork-alternation input can't fork to ~1700 codes and burn CPU (CWE-400).
+
+### Changed
+
+- `dm_soundex()`: fail hard on corrupt DM rule data instead of silently
+  clipping over-cap code alternatives, matching the BMPM engine.
 
 ## [0.4.0] - 2026-07-26
 
@@ -210,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.1...HEAD
+[0.4.1]: https://github.com/iliaal/phonetic/releases/tag/0.4.1
 [0.4.0]: https://github.com/iliaal/phonetic/releases/tag/0.4.0
 [0.3.0]: https://github.com/iliaal/phonetic/releases/tag/0.3.0
 [0.2.0]: https://github.com/iliaal/phonetic/releases/tag/0.2.0
