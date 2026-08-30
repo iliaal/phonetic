@@ -54,6 +54,11 @@ In scope:
   runaway recursion. `bmpm()`, `bmpm_match()`, `dm_soundex()`, and
   `dm_soundex_match()` reject inputs over 4096 bytes; those caps and the
   BMPM recursion bound are security boundaries, and bypasses of them are
+  in scope. `bmpm()` / `bmpm_match()` additionally bound each encode's
+  phoneme set, output size, phoneme-text copying, and language-guess
+  work, and `dm_soundex()` / `dm_soundex_match()` bound the live branch
+  set; these per-encode budgets are security boundaries too, so crafted
+  input that drives disproportionate CPU or memory up to or past them is
   in scope.
 - Arginfo / ZPP mismatches that cause undefined behavior reachable from
   PHP.

@@ -82,12 +82,25 @@ typedef struct {
 	int  last_null;           /* 1 while no replacement has been applied yet */
 } dms_branch;
 
-/* A branchy input can fork the set up to ~64 distinct codes; below this the
- * per-push linear strcmp scan is cheaper than maintaining a hash, so normal
- * (short) names never allocate or touch the hash. Above it, the O(set) scan
- * per push becomes an O(set^2)-per-character CPU sink on long input, so we
- * switch to an open-addressed index. */
+/* Normal (short) names fork the set to only a handful of distinct codes, where
+ * the per-push linear strcmp scan is cheaper than maintaining a hash, so they
+ * never allocate or touch it. Once the set passes this threshold the O(set)
+ * scan per push would become an O(set^2)-per-character CPU sink, so we switch to
+ * an open-addressed index; that keeps the dedupe cheap all the way up to the
+ * DMS_MAX_BRANCHES ceiling below. */
 #define DMS_HASH_MIN 16
+
+/* Hard ceiling on the live branch set. The input length is capped
+ * (DMS_MAX_INPUT) but the per-character sweep is O(|set| x alts), and the set
+ * size is bounded only by the number of distinct codes the input can construct
+ * -- attacker-controlled, not engine-bounded. Fork-alternation input (the very
+ * letters the DM rules exist for: c/ch/ck/rs/rz/j and the Polish/Romanian
+ * ogonek/cedilla rules) reaches ~1717 distinct codes and saturates within ~100
+ * bytes, so a 4096-byte input burns hundreds of ms of pure CPU per call
+ * (CWE-400). Real names stay in the single digits (the branching tests yield 2,
+ * the longest real name measured 8), so failing hard past this ceiling -- like
+ * the oversize rule-data guards -- only rejects pathological input. */
+#define DMS_MAX_BRANCHES 128
 
 typedef struct {
 	dms_branch *b;
@@ -155,6 +168,11 @@ static void dms_hash_build(dms_set *s)
 
 static void dms_set_push(dms_set *s, const dms_branch *br)
 {
+	if (s->n >= DMS_MAX_BRANCHES) {
+		php_error_docref(NULL, E_ERROR,
+			"phonetic: dm_soundex branch set exceeds %d distinct codes",
+			DMS_MAX_BRANCHES);
+	}
 	if (s->n == s->cap) {
 		s->cap = s->cap ? s->cap * 2 : 8;
 		s->b = erealloc(s->b, (size_t) s->cap * sizeof(dms_branch));

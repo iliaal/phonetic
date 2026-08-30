@@ -40,6 +40,79 @@
 
 #define BMPM_MAX_PHONEMES 20
 
+/* Per-encode work budget for one top-level bmpm()/bmpm_match() call. The three
+ * rule passes (main + two final passes) chain the per-application
+ * BMPM_MAX_PHONEMES cap multiplicatively (20 -> <=400 -> <=8000) because
+ * bm_apply_final's merge has no cap of its own, and the GENERIC name-prefix
+ * branch fans out up to 2^BMPM_MAX_PREFIX_DEPTH leaf encodes -- a fan-out that
+ * is oracle-faithful (Commons Codec produces the same tree) and that a crafted
+ * multi-separator input saturates. Composed, a single <=4096-byte input can
+ * materialize thousands of phonemes and tens of MB of phoneme text per call
+ * (CWE-400: super-linear BMPM expansion, in scope per SECURITY.md). These bound
+ * the distinct phonemes and phoneme-text bytes summed across every final-rule
+ * merge in the whole recursion tree (and, for bmpm_match, across BOTH operand
+ * encodes, which share one budget). Real names stay far under both (<=88
+ * phonemes, <=240 KB), so failing hard past them -- like the corrupt-table
+ * guards -- only rejects pathological input, never a real name. */
+#define BMPM_MAX_ENCODE_PHONEMES 2048
+#define BMPM_MAX_ENCODE_BYTES    (4U * 1024U * 1024U)
+
+/* Per-encode budget for the phoneme-text CHURN the phoneme-count/byte caps
+ * above do NOT bound: pb_apply rebuilds the whole phoneme set on every rule hit,
+ * copying each live phoneme's full accumulated text, so a single long token
+ * drives that cartesian rebuild into O(length^2) copying even when it dedupes to
+ * few distinct phonemes (finding-3's CPU sink). One unit is one phoneme-text
+ * byte copied (~1 ns), so the cap doubles as a rough CPU ceiling (CWE-400, in
+ * scope per SECURITY.md). The language-guess scan -- the OTHER unbounded sink --
+ * has its own tighter budget below (BMPM_MAX_ENCODE_GUESS). Real names copy well
+ * under 1 MB in every mode; the heaviest must-pass input in the corpus is the
+ * benign 4096-byte input-cap probe ('a' x4096) at ~8.4 MB. 32 MiB leaves >3x
+ * headroom over that while bounding the worst-case successful encode to a few
+ * ms, so only pathological single-token or deep-prefix input trips it (a full
+ * 4096-byte crafted input is not a real name in any mode). */
+#define BMPM_MAX_ENCODE_WORK     (32UL * 1024 * 1024)
+
+/* Companion cap for the OTHER per-child CPU sink the phoneme caps miss:
+ * bm_guess_languages scans the input against up to ~253 rules (bm_atoms_find is
+ * O(n) per non-skipped rule), and the GENERIC prefix recursion re-guesses in
+ * every child, so a multi-separator fan-out multiplies that scan ~2^depth times
+ * -- CPU disproportionate to a ~4 KB input even when it produces no phonemes
+ * (CWE-400: finding-1's unmatched-payload variant). Kept a SEPARATE, tighter
+ * budget from the phoneme-copy work above because its must-pass ceiling is far
+ * lower: the heaviest legitimate guess is the benign 4096-byte input-cap probe
+ * at ~1 M units (input length x rule count), and real names cost <100 K, so
+ * 4 MiB leaves several x headroom while bounding the fan-out to a handful of
+ * guesses. */
+#define BMPM_MAX_ENCODE_GUESS    (4UL * 1024 * 1024)
+
+typedef struct {
+	size_t phonemes;   /* distinct phonemes merged so far across this encode */
+	size_t bytes;      /* phoneme-text bytes merged so far across this encode */
+	size_t work;       /* phoneme-text bytes copied by pb_apply this encode */
+	size_t guess;      /* language-guess scan units (input len x rule count) */
+} bm_budget;
+
+/* Charge pb_apply phoneme-text churn to the shared per-encode budget and fail
+ * hard once it is exhausted, so a single long token's O(length^2) cartesian
+ * rebuild cannot run unbounded even when it dedupes to few phonemes (CWE-400). */
+static zend_always_inline void bm_budget_charge_work(bm_budget *bud, size_t amt)
+{
+	bud->work += amt;
+	if (bud->work > BMPM_MAX_ENCODE_WORK) {
+		php_error_docref(NULL, E_ERROR, "phonetic: BMPM encode exceeds work budget");
+	}
+}
+
+/* Charge one language-guess scan; the prefix recursion's fan-out draws every
+ * child's guess from this one budget so the aggregate cannot run unbounded. */
+static zend_always_inline void bm_budget_charge_guess(bm_budget *bud, size_t amt)
+{
+	bud->guess += amt;
+	if (bud->guess > BMPM_MAX_ENCODE_GUESS) {
+		php_error_docref(NULL, E_ERROR, "phonetic: BMPM encode exceeds language-guess budget");
+	}
+}
+
 /* bm_apply_final's linear dedupe compares up to `result.n` texts per insert, and
  * result.n is bounded by (incoming phonemes x BMPM_MAX_PHONEMES), so
  * `pb->n * widest text` tracks that scan's worst-case byte cost. Past this bound
@@ -664,7 +737,7 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
  * alternatives (from bm_build_ruleset_index), pruning language-incompatible
  * combinations and capping at maxPhonemes with a mid-product break, exactly
  * as PhonemeBuilder.apply does. */
-static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max)
+static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm_budget *bud)
 {
 	pbuilder out;
 	size_t li;
@@ -677,6 +750,11 @@ static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max)
 			langset_t ls = ls_restrict(pb->a[li].langs, alts[ai].langs);
 			if (ls == LS_NONE) continue;
 			if ((int) out.n < max) {
+				/* Charge the text this rebuild copies. Unlike the phoneme-count
+				 * and output-byte caps, this bounds a long token's O(length^2)
+				 * cartesian churn even when the distinct-phoneme count stays low
+				 * (CWE-400). */
+				bm_budget_charge_work(bud, pb->a[li].tn + (size_t) alts[ai].tn);
 				pb_push(&out, PHON_T(&pb->a[li]), pb->a[li].tn, alts[ai].t, (size_t) alts[ai].tn, ls);
 				if ((int) out.n >= max) { done = 1; break; }
 			}
@@ -751,7 +829,7 @@ static int rs_dispatch(const ruleset_index *ix, uint32_t c, int *off, int *cnt)
  * Unmatched positions are dropped (no literal append), matching the main pass
  * in PhoneticEngine.encode. */
 static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
-                     const uint32_t *cp, int n, int max)
+                     const uint32_t *cp, int n, int max, bm_budget *bud)
 {
 	int i = 0;
 	if (rs == NULL || rs->rules == NULL) return;
@@ -768,7 +846,7 @@ static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 				if (!bm_seqeq(cp + i, plen, pat, plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, cp, i)) continue;
-				pb_apply(pb, ix->decoded[r].alts, ix->decoded[r].nalts, max);
+				pb_apply(pb, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud);
 				adv = plen;
 				break;
 			}
@@ -802,7 +880,7 @@ static int bm_phon_qcmp(const void *va, const void *vb)
  * phoneme's text, then collapses duplicates by text while unioning language
  * sets, leaving the result ordered by the phoneme comparator. */
 static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
-                        int max)
+                        int max, bm_budget *bud)
 {
 	pbuilder result;
 	size_t pi;
@@ -872,7 +950,7 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 						if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
 						if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
 						if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
-						pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max);
+						pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud);
 						found = 1;
 						adv = plen;
 						break;
@@ -910,6 +988,19 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 					hit->langs = ls_merge(hit->langs, np->langs);
 				} else {
 					size_t idx = result.n;
+					/* Charge the shared per-encode budget before growing the set.
+					 * Checked here -- the one place distinct phonemes are added --
+					 * so every leaf of the prefix-recursion tree draws from the
+					 * same budget: a single exploding leaf or a wide fan-out of
+					 * many leaves both fail hard before the phoneme set or its
+					 * text can grow disproportionate to the input (CWE-400). */
+					bud->phonemes++;
+					bud->bytes += np->tn;
+					if (bud->phonemes > BMPM_MAX_ENCODE_PHONEMES
+							|| bud->bytes > BMPM_MAX_ENCODE_BYTES) {
+						php_error_docref(NULL, E_ERROR,
+							"phonetic: BMPM encode exceeds phoneme-set budget");
+					}
 					pb_reserve(&result, result.n + 1);
 					/* Move the whole phoneme (heap pointer or inline bytes) into
 					 * the result, then null the source's heap pointer so pb_free
@@ -1028,13 +1119,17 @@ static int bm_find_lang_slot(int nt)
 /* Guess the language set from already-lowercased code points. The caller
  * decodes and lowercases once (bm_encode_string), so the default path pays a
  * single UTF-8 decode instead of one per phase. */
-static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n)
+static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n, bm_budget *bud)
 {
 	int i;
 	const langset_index *li = &g_lang_index[bm_find_lang_slot(nt)];
 	langset_t mask = ls_full(nt);
 	uint64_t present[2] = { 0, 0 };   /* which ASCII code points the input contains */
 	size_t r;
+
+	/* Charge this guess's worst-case scan (input length x rule count) to the
+	 * dedicated guess budget; see bm_budget_charge_guess. */
+	bm_budget_charge_guess(bud, (size_t) n * li->count);
 
 	for (i = 0; i < n; i++) {
 		uint32_t c = cp[i];
@@ -1115,10 +1210,10 @@ static int bm_is_ws(uint32_t c)
  * split variants too. Commons Codec re-guesses inside its prefix branch even
  * under a forced LanguageSet — a documented, deliberate divergence: the PHP
  * API validates and advertises the language as forced, so it stays forced. */
-static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp, int n, size_t *outlen, int depth);
+static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp, int n, size_t *outlen, int depth, bm_budget *bud);
 
 static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
-                         const uint32_t *cp, int n, size_t *outlen, int depth)
+                         const uint32_t *cp, int n, size_t *outlen, int depth, bm_budget *bud)
 {
 	const char *lang = "any";
 	const char *single;
@@ -1158,8 +1253,8 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 			char *renc, *cenc, *out;
 			cbuf[0] = 'd';
 			memcpy(cbuf + 1, tcp + 2, (size_t) (tn - 2) * sizeof(uint32_t));
-			renc = bm_encode_sub(nt, rt, forced, tcp + 2, tn - 2, &rr, depth + 1);
-			cenc = bm_encode_sub(nt, rt, forced, cbuf, tn - 1, &cr, depth + 1);
+			renc = bm_encode_sub(nt, rt, forced, tcp + 2, tn - 2, &rr, depth + 1, bud);
+			cenc = bm_encode_sub(nt, rt, forced, cbuf, tn - 1, &cr, depth + 1, bud);
 			efree(cbuf);
 			out = bm_pair_string(renc, rr, cenc, cr, outlen);
 			efree(renc);
@@ -1186,8 +1281,8 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 					cbuf[k] = (uint32_t) (unsigned char) l[k];
 				}
 				memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
-				renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1);
-				cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1);
+				renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1, bud);
+				cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1, bud);
 				efree(cbuf);
 				out = bm_pair_string(renc, rr, cenc, cr, outlen);
 				efree(renc);
@@ -1271,9 +1366,9 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 				char *out;
 				pb_init(&pb);
 				pb_seed(&pb, ls);
-				bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES);
-				bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES);
-				bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES);
+				bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES, bud);
+				bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES, bud);
+				bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES, bud);
 				out = pb_makestring(&pb, outlen);
 				pb_free(&pb);
 				efree(jn);
@@ -1288,16 +1383,16 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 /* Recursion entry: code points are already lowercased and '-'-mapped. A
  * forced language stays forced; otherwise each split variant is re-guessed
  * (the sub-name's letters may imply a different language than the whole). */
-static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp, int n, size_t *outlen, int depth)
+static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp, int n, size_t *outlen, int depth, bm_budget *bud)
 {
-	langset_t ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n);
-	return bm_encode_core(nt, rt, ls, forced, cp, n, outlen, depth);
+	langset_t ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n, bud);
+	return bm_encode_core(nt, rt, ls, forced, cp, n, outlen, depth, bud);
 }
 
 /* String entry: decode and lowercase exactly once. Language guessing sees the
  * lowercased but untidied text (hyphens intact, untrimmed), like the
  * reference's Lang.guessLanguages; the '-' -> ' ' tidy happens after. */
-static char *bm_encode_string(int nt, int rt, langset_t forced, const char *input, size_t len, size_t *outlen)
+static char *bm_encode_string(int nt, int rt, langset_t forced, const char *input, size_t len, size_t *outlen, bm_budget *bud)
 {
 	int n, i;
 	uint32_t *cp = ph_u8_decode(input, len, &n);
@@ -1305,9 +1400,9 @@ static char *bm_encode_string(int nt, int rt, langset_t forced, const char *inpu
 	char *out;
 
 	for (i = 0; i < n; i++) cp[i] = bm_lc_cp(cp[i]);
-	ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n);
+	ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n, bud);
 	for (i = 0; i < n; i++) if (cp[i] == '-') cp[i] = ' ';
-	out = bm_encode_core(nt, rt, ls, forced, cp, n, outlen, 0);
+	out = bm_encode_core(nt, rt, ls, forced, cp, n, outlen, 0, bud);
 	efree(cp);
 	return out;
 }
@@ -1414,8 +1509,11 @@ PHP_FUNCTION(bmpm)
 		RETURN_THROWS();
 	}
 
-	result = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced,
-	                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len);
+	{
+		bm_budget bud = {0, 0, 0, 0};
+		result = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced,
+		                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len, &bud);
+	}
 
 	RETVAL_STRINGL(result, result_len);
 	efree(result);
@@ -1526,7 +1624,11 @@ PHP_FUNCTION(bmpm_match)
 		RETURN_THROWS();
 	}
 
-	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral);
+	/* One budget spans BOTH operand encodes: a two-operand call must not get
+	 * twice the per-encode work/output allowance a single bmpm() call gets. */
+	bm_budget bud = {0, 0, 0, 0};
+
+	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral, &bud);
 	if (ral == 0) {
 		efree(ra);
 		RETURN_FALSE;
@@ -1536,7 +1638,7 @@ PHP_FUNCTION(bmpm_match)
 		efree(ra);
 		RETURN_TRUE;
 	}
-	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl);
+	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, &bud);
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
 
