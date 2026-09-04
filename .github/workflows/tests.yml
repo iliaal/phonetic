@@ -17,6 +17,7 @@ jobs:
   validate:
     name: Validate composer.json
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,6 +35,7 @@ jobs:
   pie-smoke:
     name: PIE install smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,12 +82,14 @@ jobs:
             echo "pie functional smoke ok\n";
           '
 
-  # The BMPM / Daitch-Mokotoff C tables (src/bmpm_data.h) are generated from the
-  # vendored rule files. Regenerate and fail if the checked-in header is stale,
-  # so a vendor-data or generator edit can't ship out-of-sync tables.
+  # The BMPM / Daitch-Mokotoff C tables (src/bmpm_data.h + src/dm_data.h) are
+  # generated from the vendored rule files. Regenerate and fail if either
+  # checked-in header is stale, so a vendor-data or generator edit can't ship
+  # out-of-sync tables.
   codegen:
     name: Generated files are up to date
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,19 +99,21 @@ jobs:
         with:
           php-version: '8.4'
           coverage: none
-      - name: Regenerate src/bmpm_data.h from vendored rule data
+      - name: Regenerate src/bmpm_data.h + src/dm_data.h from vendored rule data
         run: php scripts/gen_bmpm_data.php
-      - name: Fail if the checked-in header is stale
-        run: git diff --exit-code src/bmpm_data.h
+      - name: Fail if a checked-in header is stale
+        run: git diff --exit-code src/bmpm_data.h src/dm_data.h
       - name: Verify arginfo matches phonetic.stub.php
         run: php scripts/check_arginfo.php
 
   # Compare every configured mode/word pair against a frozen Apache Commons
   # Codec 1.17.1 golden. The checker rejects incomplete or duplicate fixtures,
-  # so deleting rows cannot weaken this gate silently. No Java is needed here.
+  # and the golden is regenerated from the pinned oracle jar (runner Java) and
+  # diffed first, so a hand-edited or shrunk corpus cannot pass silently.
   parity:
     name: Commons Codec parity
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,6 +123,14 @@ jobs:
         with:
           php-version: '8.4'
           tools: phpize, php-config
+      - name: Golden matches pinned-oracle regen
+        run: |
+          # Regenerate golden.tsv from the pinned jar and fail on any delta, so
+          # a hand-edited or shrunk corpus cannot pass the check below.
+          set -euo pipefail
+          scripts/oracle/fetch-codec.sh
+          php scripts/oracle/parity/generate.php
+          git diff --exit-code scripts/oracle/parity/golden.tsv
       - name: Build extension
         run: |
           phpize
@@ -128,6 +142,7 @@ jobs:
   linux:
     name: PHP ${{ matrix.php }} - Linux
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -146,13 +161,11 @@ jobs:
 
       - name: Build extension
         run: |
+          # --enable-phonetic-dev sets -Werror, so any warning fails this step.
+          set -euo pipefail
           phpize
           ./configure --enable-phonetic --enable-phonetic-dev
-          WARNINGS=$(make -j$(nproc) 2>&1 | tee /dev/stderr | grep -c 'warning:' || true)
-          if [ "$WARNINGS" -gt 0 ]; then
-            echo "::error::Build produced $WARNINGS warning(s)"
-            exit 1
-          fi
+          make -j$(nproc)
 
       - name: Run tests
         run: |
@@ -184,6 +197,7 @@ jobs:
   macos:
     name: PHP ${{ matrix.php }} - macOS
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -203,6 +217,8 @@ jobs:
 
       - name: Build extension
         run: |
+          # --enable-phonetic-dev sets -Werror, so any warning fails this step.
+          set -euo pipefail
           phpize
           ./configure --enable-phonetic --enable-phonetic-dev
           make -j$(sysctl -n hw.ncpu)
@@ -234,6 +250,7 @@ jobs:
   asan:
     name: PHP ${{ matrix.php }} - ASAN
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -330,6 +347,7 @@ jobs:
   windows-matrix:
     name: Resolve Windows matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -345,6 +363,7 @@ jobs:
     name: Windows ${{ matrix.php-version }} ${{ matrix.ts }} ${{ matrix.arch }}
     needs: windows-matrix
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.windows-matrix.outputs.matrix) }}
@@ -352,18 +371,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # run-tests.php exits 0 when every test is SKIPPED (extension load
-      # failure). Linux/macOS jobs fail-closed on that; this action runs
-      # build+tests in one step. Assert the DLL was produced so a total
-      # package failure cannot look green. Residual: all-SKIP with a present
-      # DLL still depends on the builder's test runner exit policy.
+      # run-tests.php exits 0 when every test is SKIPPED (e.g. extension load
+      # failure). This action runs build+tests in one step and cannot gate on
+      # that, so the suite is re-run below with the Linux skip-guard counts.
       - uses: php/php-windows-builder/extension@29352c0ef9e8ce65264ea9e287881a6f7758a953 # 1.9.0
         with:
           php-version: ${{ matrix.php-version }}
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           run-tests: 'true'
-          args: '--enable-phonetic'
+          args: '--enable-phonetic --enable-phonetic-dev'
       - name: Assert Windows DLL was produced
         shell: pwsh
         run: |
@@ -374,3 +391,42 @@ jobs:
             exit 1
           }
           Write-Host "Found $($dll.FullName)"
+      - name: Re-run tests with fail-closed skip guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # run-tests.php exits 0 on an all-SKIP run, so the builder step above
+          # cannot gate on it. Mirror the Linux counts: fail on any
+          # skip/bork/leak/failure or an empty pass count.
+          phpbin="build/php-bin/php.exe"
+          if [ ! -f "$phpbin" ]; then
+            phpbin="$(command -v php || true)"
+            test -n "$phpbin" || { echo "::error::php.exe not found"; exit 1; }
+          fi
+          runner="build/run-tests.php"
+          if [ ! -f "$runner" ]; then
+            runner="$(find . -name "run-tests.php" -not -path "./vendor/*" | head -n 1)"
+            test -n "$runner" || { echo "::error::run-tests.php not found"; exit 1; }
+          fi
+          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
+          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
+          dllwin="$(cygpath -w "$dll")"
+          runnerwin="$(cygpath -w "$runner")"
+          "$phpbin" -n -d "extension=$dllwin" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load"; exit 1; }
+          export TEST_PHP_EXECUTABLE="$(cygpath -w "$phpbin")"
+          export TEST_PHP_ARGS="-n -d extension=$dllwin"
+          export NO_INTERACTION=1
+          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || true
+          echo "$RESULT"
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          echo "passed=$PASSED failed=$FAILED skipped=$SKIPPED borked=$BORKED leaked=$LEAKED"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi

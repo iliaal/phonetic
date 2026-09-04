@@ -7,13 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+ - `bmpm_match()`: each operand gets a full per-encode work allowance instead of
+  sharing one budget, so two individually-legal inputs no longer fail together.
+ - `dm_soundex()` / `dm_soundex_match()`: branch-set saturation keeps the first
+  128 distinct codes (deterministic) instead of raising `E_ERROR`.
+ - Rule data: Daitch-Mokotoff tables moved from `src/bmpm_data.h` to generated
+  `src/dm_data.h` (contents identical); the generator validates language rows.
+ - Oracle parity matrix grows to 684 rows with a forced-language BMPM mode.
+
+### Fixed
+
+ - CI: warning gate no longer masks `make` failures; Windows job fails closed on
+  all-SKIP; `timeout-minutes` everywhere; warnings gated on macOS and Windows.
+ - Parity checker: fixture tests for every fail-closed guard; exact oracle pins
+  in budget tests; golden regen-and-diff runs in CI.
+ - Docs: MRA identical-raw exception, stub `@throws`/fatal notes, dead `J`
+  advance removed from `double_metaphone()` (no behavior change).
+
+
 ## [0.4.1] - 2026-08-30
 
 ### Security
 
 - `bmpm()` / `bmpm_match()`: cap each encode's phoneme set, output, text copying,
-  and language-guess work, failing hard on crafted super-linear input (CWE-400).
-- `dm_soundex()` / `dm_soundex_match()`: cap the live branch set at 128 distinct
+  and language-guess work, failing hard on crafted super-linear input (CWE-400;
+  E_ERROR fatal, not ValueError).
+ - `dm_soundex()` / `dm_soundex_match()`: cap the live branch set at 128 distinct
   codes, so fork-alternation input can't fork to ~1700 codes and burn CPU (CWE-400).
 
 ### Changed

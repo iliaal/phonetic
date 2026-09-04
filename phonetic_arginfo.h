@@ -1,5 +1,5 @@
 /* This is a generated file, edit phonetic.stub.php instead.
- * Stub hash: b35cafe526422f58d1ce9933fc98091fe0f2e83d */
+ * Stub hash: 2edb5e414fd28324c70b25e90eb2bb5aa9e34e7a */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_double_metaphone, 0, 1, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)

@@ -20,6 +20,7 @@ const PARITY_MODES = [
     'bmpm_ash_exact',
     'bmpm_sep_approx',
     'bmpm_sep_exact',
+    'bmpm_gen_forced',
 ];
 
 if (!extension_loaded('phonetic')) {
@@ -89,6 +90,8 @@ function phonetic_out(string $mode, string $word): string
             return norm_set(bmpm($word, BMPM_SEPHARDIC, BMPM_APPROX));
         case 'bmpm_sep_exact':
             return norm_set(bmpm($word, BMPM_SEPHARDIC, BMPM_EXACT));
+        case 'bmpm_gen_forced':
+            return norm_set(bmpm($word, BMPM_GENERIC, BMPM_APPROX, 'english'));
     }
     throw new LogicException("unsupported parity mode: $mode");
 }

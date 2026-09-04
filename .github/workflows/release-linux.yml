@@ -42,6 +42,7 @@ jobs:
   build:
     name: ${{ matrix.os }} php ${{ matrix.php }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
@@ -77,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           php scripts/gen_bmpm_data.php
-          git diff --exit-code src/bmpm_data.h
+          git diff --exit-code src/bmpm_data.h src/dm_data.h
           php scripts/check_arginfo.php
 
       - name: Commons Codec parity
@@ -124,6 +125,7 @@ jobs:
     needs: build
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     permissions:
       contents: write # Uploads Linux/macOS prebuilt .so assets to the GitHub Release.
     strategy:

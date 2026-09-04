@@ -50,8 +50,8 @@
  * materialize thousands of phonemes and tens of MB of phoneme text per call
  * (CWE-400: super-linear BMPM expansion, in scope per SECURITY.md). These bound
  * the distinct phonemes and phoneme-text bytes summed across every final-rule
- * merge in the whole recursion tree (and, for bmpm_match, across BOTH operand
- * encodes, which share one budget). Real names stay far under both (<=88
+ * merge in the whole recursion tree (each bmpm_match operand gets a full
+ * per-encode allowance). Real names stay far under both (<=88
  * phonemes, <=240 KB), so failing hard past them -- like the corrupt-table
  * guards -- only rejects pathological input, never a real name. */
 #define BMPM_MAX_ENCODE_PHONEMES 2048
@@ -1624,11 +1624,12 @@ PHP_FUNCTION(bmpm_match)
 		RETURN_THROWS();
 	}
 
-	/* One budget spans BOTH operand encodes: a two-operand call must not get
-	 * twice the per-encode work/output allowance a single bmpm() call gets. */
-	bm_budget bud = {0, 0, 0, 0};
+	/* Each operand gets a full per-encode allowance: a two-operand call may do
+	 * up to twice the work of one bmpm() call; a single pathological operand
+	 * still fails hard against its own allowance. */
+	bm_budget buda = {0, 0, 0, 0}, budb = {0, 0, 0, 0};
 
-	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral, &bud);
+	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral, &buda);
 	if (ral == 0) {
 		efree(ra);
 		RETURN_FALSE;
@@ -1638,7 +1639,7 @@ PHP_FUNCTION(bmpm_match)
 		efree(ra);
 		RETURN_TRUE;
 	}
-	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, &bud);
+	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, &budb);
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
 

@@ -33,6 +33,7 @@ $vendor  = $root . '/vendor/commons-codec-bm';
 $bm_dir  = $vendor . '/bm';
 $dm_file = $vendor . '/dmrules.txt';
 $out     = $root . '/src/bmpm_data.h';
+$out_dm   = $root . '/src/dm_data.h';
 
 if (!is_dir($bm_dir)) {
     fwrite(STDERR, "error: vendored BM directory not found: $bm_dir\n");
@@ -316,10 +317,29 @@ foreach (NAME_TYPES as $nt) {
     }
 }
 
-/* Language-guessing rules (xx_lang.txt): regex  lang1+lang2  true|false. */
+/* Language-guessing rules (xx_lang.txt): regex  lang1+lang2  true|false.
+ *
+ * The accept column must read exactly true/false, and every '+'-separated
+ * language token must be a language of that name type: bm_parse_lang_list()
+ * in src/bmpm.c silently skips unknown tokens, so an unchecked typo would
+ * zero the rule's mask (accept) or leave it wide open (deny) with no signal.
+ *
+ * Two Commons Codec 1.17.1 rows carry upstream typos whose unknown tokens the
+ * Java oracle itself ignores -- ash "^vogel german," and ash "<gimel> ebrew"
+ * (U+05D2). Ignored, each rule's mask is empty: under accept it intersects
+ * the guess to empty and the engine falls back to "any", exactly what the
+ * oracle emits (engine == oracle on "vogel"; see tests/bmpm_ash_vogel.phpt).
+ * Normalizing the tokens would DIVERGE from the oracle, and vendor/ is
+ * immutable, so the two oracle-pinned tokens are allowlisted and anything
+ * else still fails the regen. */
+const LANG_TOKEN_ALLOWLIST = [
+    ['ash', '^vogel', 'german,'],
+    ['ash', "ג", 'ebrew'],
+];
 $lang_rules = [];
 foreach (NAME_TYPES as $nt) {
     $rows = [];
+    $langset = array_flip($languages[$nt]);
     foreach (logical_lines("$bm_dir/{$nt}_lang.txt") as $line) {
         $parts = preg_split('/\s+/', $line);
         if (count($parts) < 3) {
@@ -327,6 +347,14 @@ foreach (NAME_TYPES as $nt) {
         }
         if (cp_count($parts[0]) > CAP_BM_GUESS_CPS) {
             fail("lang-guess pattern exceeds " . CAP_BM_GUESS_CPS . " code points in {$nt}_lang.txt: $parts[0]");
+        }
+        if ($parts[2] !== 'true' && $parts[2] !== 'false') {
+            fail("lang-guess accept must be exactly true/false in {$nt}_lang.txt: '$line'");
+        }
+        foreach (explode('+', $parts[1]) as $tok) {
+            if (!isset($langset[$tok]) && !in_array([$nt, $parts[0], $tok], LANG_TOKEN_ALLOWLIST, true)) {
+                fail("unknown language '$tok' in {$nt}_lang.txt: '$line'");
+            }
         }
         $rows[] = [$parts[0], $parts[1], $parts[2] === 'true'];
     }
@@ -378,7 +406,7 @@ foreach (logical_lines($dm_file) as $line) {
 $files_parsed++;
 
 /* ---------------------------------------------------------------------------
- * Emit src/bmpm_data.h
+ * Emit src/bmpm_data.h + src/dm_data.h
  * ------------------------------------------------------------------------- */
 
 $total_rules = 0;
@@ -407,7 +435,7 @@ $b[] = ' * GENERATED FILE -- DO NOT EDIT BY HAND.';
 $b[] = ' *';
 $b[] = ' * Regenerate with:  php scripts/gen_bmpm_data.php';
 $b[] = ' *';
-$b[] = ' * Source data: Beider-Morse and Daitch-Mokotoff rule files vendored from';
+$b[] = ' * Source data: Beider-Morse rule files vendored from';
 $b[] = ' * Apache Commons Codec (Apache License 2.0) under vendor/commons-codec-bm/.';
 $b[] = ' * Pattern / context / phoneme / code columns are stored RAW (uninterpreted);';
 $b[] = ' * the phonetic engines compile the regex and phoneme grammar at runtime.';
@@ -426,11 +454,7 @@ $b[] = ' *   bmpm_lang_rule   : one language-guessing rule from xx_lang.txt: a r
 $b[] = ' *                      raw "+"-joined language set it implies, and accept flag.';
 $b[] = ' *   bmpm_lang_set[]  : per-name-type language-guessing rule lists.';
 $b[] = ' *   bmpm_languages_* : per-name-type ordered language lists (xx_languages.txt);';
-$b[] = ' *                      order is significant and matches upstream.';
-$b[] = ' *   dm_rule          : one Daitch-Mokotoff rule: pattern + three code columns';
-$b[] = ' *                      (at_start / before_vowel / default). A code column may';
-$b[] = ' *                      hold "|"-separated branch alternatives, kept raw.';
-$b[] = ' *   dm_folding       : one accent/ligature folding (from -> to), raw UTF-8.';
+$b[] = ' *   (Daitch-Mokotoff tables live in src/dm_data.h, emitted by the same run.)';
 $b[] = ' *';
 $b[] = ' * name_type values : BMPM_GEN ("gen"), BMPM_ASH ("ash"), BMPM_SEP ("sep").';
 $b[] = ' * rule_type values : BMPM_RULES ("rules"), BMPM_RT_APPROX ("approx"), BMPM_RT_EXACT ("exact").';
@@ -450,9 +474,6 @@ $b[] = '#define BMPM_CAP_PHONEME_ALTS ' . CAP_BM_PHONEME_ALTS;
 $b[] = '#define BMPM_CAP_LANG_BRACKET ' . CAP_BM_LANG_BRACKET;
 $b[] = '#define BMPM_CAP_GUESS_CPS    ' . CAP_BM_GUESS_CPS;
 $b[] = '#define BMPM_CAP_LANGUAGES    ' . CAP_BM_LANGUAGES;
-$b[] = '/* DM Soundex replacement-field caps (dms_encode alts[][]). */';
-$b[] = '#define DMS_CAP_CODE_ALTS     ' . CAP_DM_CODE_ALTS;
-$b[] = '#define DMS_CAP_CODE_LEN      ' . CAP_DM_CODE_LEN;
 $b[] = '';
 $b[] = 'enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };';
 $b[] = 'enum bmpm_rule_type { BMPM_RULES = 0, BMPM_RT_APPROX = 1, BMPM_RT_EXACT = 2 };';
@@ -489,19 +510,6 @@ $b[] = '    int                 name_type;';
 $b[] = '    const char *const  *languages;';
 $b[] = '    size_t              count;';
 $b[] = '} bmpm_language_list;';
-$b[] = '';
-$b[] = 'typedef struct {';
-$b[] = '    const char *pattern;';
-$b[] = '    const char *at_start;';
-$b[] = '    const char *before_vowel;';
-$b[] = '    const char *default_code;';
-$b[] = '} dm_rule;';
-$b[] = '';
-$b[] = 'typedef struct {';
-$b[] = '    const char *from;';
-$b[] = '    int         from_len;   /* strlen(from), precomputed */';
-$b[] = '    const char *to;';
-$b[] = '} dm_folding;';
 $b[] = '';
 
 $nt_enum = ['gen' => 'BMPM_GEN', 'ash' => 'BMPM_ASH', 'sep' => 'BMPM_SEP'];
@@ -587,59 +595,123 @@ $b[] = '};';
 $b[] = 'static const size_t bmpm_lang_sets_count = ' . count($lang_set_table) . ';';
 $b[] = '';
 
-/* Daitch-Mokotoff. */
-$b[] = '/* ---- Daitch-Mokotoff rules (dmrules.txt) ---- */';
-$b[] = 'static const dm_rule dm_rules[] = {';
+/* Daitch-Mokotoff header (src/dm_data.h), emitted by the same run. */
+$d = [];
+$d[] = '/*';
+$d[] = '  +----------------------------------------------------------------------+';
+$d[] = '  | Copyright (c) 2026, Ilia Alshanetsky                                 |';
+$d[] = '  | Copyright (c) 2026, Advanced Internet Designs Inc.                   |';
+$d[] = '  +----------------------------------------------------------------------+';
+$d[] = '  | The generator and the C scaffolding in this file are subject to the  |';
+$d[] = '  | BSD 3-Clause license bundled with this package in the file LICENSE.  |';
+$d[] = '  | The embedded rule tables are mechanically transformed from Apache    |';
+$d[] = '  | Commons Codec resource files and remain under the Apache License 2.0 |';
+$d[] = '  | (see LICENSE Section 2 and vendor/commons-codec-bm/).                |';
+$d[] = '  +----------------------------------------------------------------------+';
+$d[] = '  | Author: Ilia Alshanetsky <ilia@ilia.ws>                              |';
+$d[] = '  +----------------------------------------------------------------------+';
+$d[] = '*/';
+$d[] = '';
+$d[] = '/*';
+$d[] = ' * GENERATED FILE -- DO NOT EDIT BY HAND.';
+$d[] = ' *';
+$d[] = ' * Regenerate with:  php scripts/gen_bmpm_data.php';
+$d[] = ' *';
+$d[] = ' * Source data: Daitch-Mokotoff rule file vendored from';
+$d[] = ' * Apache Commons Codec (Apache License 2.0) under vendor/commons-codec-bm/.';
+$d[] = ' * Pattern / code columns are stored RAW (uninterpreted);';
+$d[] = ' * the Daitch-Mokotoff engine compiles them at runtime.';
+$d[] = ' * (Companion to src/bmpm_data.h, emitted by the same run.)';
+$d[] = ' *';
+$d[] = ' * Schema';
+$d[] = ' * ------';
+$d[] = ' *   dm_rule          : one Daitch-Mokotoff rule: pattern + three code columns';
+$d[] = ' *                      (at_start / before_vowel / default). A code column may';
+$d[] = ' *                      hold "|"-separated branch alternatives, kept raw.';
+$d[] = ' *   dm_folding       : one accent/ligature folding (from -> to), raw UTF-8.';
+$d[] = ' *';
+$d[] = ' * Stack/buffer caps below are the single source of truth shared with src/dm_soundex.c.';
+$d[] = ' */';
+$d[] = '';
+$d[] = '#ifndef PHP_DM_DATA_H';
+$d[] = '#define PHP_DM_DATA_H';
+$d[] = '';
+$d[] = '#include <stddef.h>';
+$d[] = '';
+$d[] = '/* DM Soundex replacement-field caps (dms_encode alts[][]). */';
+$d[] = '#define DMS_CAP_CODE_ALTS     ' . CAP_DM_CODE_ALTS;
+$d[] = '#define DMS_CAP_CODE_LEN      ' . CAP_DM_CODE_LEN;
+$d[] = '/* DM Soundex folding comparison window (dms_cleanup tmp[]). */';
+$d[] = '#define DMS_CAP_FOLD_FROM     ' . CAP_DM_FOLD_FROM;
+$d[] = '';
+$d[] = 'typedef struct {';
+$d[] = '    const char *pattern;';
+$d[] = '    const char *at_start;';
+$d[] = '    const char *before_vowel;';
+$d[] = '    const char *default_code;';
+$d[] = '} dm_rule;';
+$d[] = '';
+$d[] = 'typedef struct {';
+$d[] = '    const char *from;';
+$d[] = '    int         from_len;   /* strlen(from), precomputed */';
+$d[] = '    const char *to;';
+$d[] = '} dm_folding;';
+$d[] = '';
+$d[] = '/* ---- Daitch-Mokotoff rules (dmrules.txt) ---- */';
+$d[] = 'static const dm_rule dm_rules[] = {';
 foreach ($dm_rules as $r) {
-    $b[] = sprintf('    { %s, %s, %s, %s },',
+    $d[] = sprintf('    { %s, %s, %s, %s },',
         c_str($r[0]), c_str($r[1]), c_str($r[2]), c_str($r[3]));
 }
-$b[] = '};';
-$b[] = 'static const size_t dm_rules_count = ' . count($dm_rules) . ';';
-$b[] = '';
-$b[] = '/* ---- Daitch-Mokotoff accent / ligature foldings ---- */';
-$b[] = 'static const dm_folding dm_foldings[] = {';
+$d[] = '};';
+$d[] = 'static const size_t dm_rules_count = ' . count($dm_rules) . ';';
+$d[] = '';
+$d[] = '/* ---- Daitch-Mokotoff accent / ligature foldings ---- */';
+$d[] = 'static const dm_folding dm_foldings[] = {';
 foreach ($dm_foldings as $f) {
-    $b[] = sprintf('    { %s, %d, %s },', c_str($f[0]), strlen($f[0]), c_str($f[1]));
+    $d[] = sprintf('    { %s, %d, %s },', c_str($f[0]), strlen($f[0]), c_str($f[1]));
 }
-$b[] = '};';
-$b[] = 'static const size_t dm_foldings_count = ' . count($dm_foldings) . ';';
-$b[] = '';
+$d[] = '};';
+$d[] = 'static const size_t dm_foldings_count = ' . count($dm_foldings) . ';';
+$d[] = '';
+$d[] = '#endif /* PHP_DM_DATA_H */';
+$d[] = '';
 $b[] = '#endif /* PHP_BMPM_DATA_H */';
 $b[] = '';
-
-$content = implode("\n", $b);
-
 /* Structural sanity before writing: the section comments are hard-coded, but a
  * future generator edit that leaves a comment unbalanced (or drops the include
  * guard) would emit a header that fails to compile in a confusing way. Fail
  * here with a clear message instead. */
-if (substr_count($content, '/*') !== substr_count($content, '*/')) {
-    fail("generated header has unbalanced /* */ comment delimiters");
+function write_generated_header(string $path, string $content, string $guard): void
+{
+    if (substr_count($content, '/*') !== substr_count($content, '*/')) {
+        fail("generated header has unbalanced /* */ comment delimiters: $path");
+    }
+    if (!str_contains($content, "#ifndef $guard")
+        || !str_contains($content, "#define $guard")
+        || substr(rtrim($content), -strlen("#endif /* $guard */"))
+           !== "#endif /* $guard */") {
+        fail("generated header is missing its include guard: $path");
+    }
+    /* Write to a temp file and rename() into place: an interrupted run must never
+     * leave a half-written header that still compiles into stale tables. */
+    $tmp = $path . '.tmp';
+    if (file_put_contents($tmp, $content) === false) {
+        fail("could not write $tmp");
+    }
+    if (!rename($tmp, $path)) {
+        @unlink($tmp);
+        fail("could not rename $tmp to $path");
+    }
 }
-if (!str_contains($content, '#ifndef PHP_BMPM_DATA_H')
-    || !str_contains($content, '#define PHP_BMPM_DATA_H')
-    || substr(rtrim($content), -strlen('#endif /* PHP_BMPM_DATA_H */'))
-       !== '#endif /* PHP_BMPM_DATA_H */') {
-    fail("generated header is missing its include guard");
-}
-
-/* Write to a temp file and rename() into place: an interrupted run must never
- * leave a half-written src/bmpm_data.h that still compiles into stale tables. */
-$tmp = $out . '.tmp';
-if (file_put_contents($tmp, $content) === false) {
-    fail("could not write $tmp");
-}
-if (!rename($tmp, $out)) {
-    @unlink($tmp);
-    fail("could not rename $tmp to $out");
-}
+write_generated_header($out, implode("\n", $b), 'PHP_BMPM_DATA_H');
+write_generated_header($out_dm, implode("\n", $d), 'PHP_DM_DATA_H');
 
 /* ---------------------------------------------------------------------------
  * Stats
  * ------------------------------------------------------------------------- */
 
-fwrite(STDOUT, "Generated $out\n");
+fwrite(STDOUT, "Generated $out\nGenerated $out_dm\n");
 fwrite(STDOUT, sprintf("  resource files parsed : %d\n", $files_parsed));
 fwrite(STDOUT, sprintf("  BMPM rulesets         : %d\n", count($rulesets)));
 fwrite(STDOUT, sprintf("  BMPM rules (total)    : %d\n", $total_rules));

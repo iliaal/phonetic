@@ -475,11 +475,11 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 						&& (B(pos + 1) == 'A' || B(pos + 1) == 'O')) {
 					pc = "J";
 					sc = "H";
-					adv = (B(pos + 1) == 'J') ? 2 : 1;
+					adv = 1;
 				} else if (pos == end) {
 					pc = "J";
 					sc = " ";
-					adv = (B(pos + 1) == 'J') ? 2 : 1;
+					adv = 1;
 				} else if (!(B(pos + 1) == 'L' || B(pos + 1) == 'T' || B(pos + 1) == 'K'
 							|| B(pos + 1) == 'S' || B(pos + 1) == 'N' || B(pos + 1) == 'M'
 							|| B(pos + 1) == 'B' || B(pos + 1) == 'Z')

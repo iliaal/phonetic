@@ -12,7 +12,7 @@
 
 /* Daitch-Mokotoff Soundex engine. Rule data (dmrules.txt) is vendored from
  * Apache Commons Codec (Apache-2.0) and compiled in via the generated
- * bmpm_data.h. This engine replicates Commons Codec 1.17.1
+ * dm_data.h. This engine replicates Commons Codec 1.17.1
  * DaitchMokotoffSoundex.soundex() (branching enabled). */
 
 #ifdef HAVE_CONFIG_H
@@ -23,7 +23,7 @@
 #include "php_phonetic.h"
 #include "zend_smart_str.h"
 #include "phonetic_utf8.h"
-#include "bmpm_data.h"
+#include "dm_data.h"
 
 #include <string.h>
 
@@ -97,9 +97,10 @@ typedef struct {
  * letters the DM rules exist for: c/ch/ck/rs/rz/j and the Polish/Romanian
  * ogonek/cedilla rules) reaches ~1717 distinct codes and saturates within ~100
  * bytes, so a 4096-byte input burns hundreds of ms of pure CPU per call
- * (CWE-400). Real names stay in the single digits (the branching tests yield 2,
- * the longest real name measured 8), so failing hard past this ceiling -- like
- * the oversize rule-data guards -- only rejects pathological input. */
+ * (CWE-400). Past this ceiling the set keeps the first 128 distinct codes in
+ * insertion order, drops later ones, and keeps encoding -- output stays
+ * deterministic, and real names (single-digit sets: the branching tests yield
+ * 2, the longest real name measured 8) never reach it. */
 #define DMS_MAX_BRANCHES 128
 
 typedef struct {
@@ -169,9 +170,7 @@ static void dms_hash_build(dms_set *s)
 static void dms_set_push(dms_set *s, const dms_branch *br)
 {
 	if (s->n >= DMS_MAX_BRANCHES) {
-		php_error_docref(NULL, E_ERROR,
-			"phonetic: dm_soundex branch set exceeds %d distinct codes",
-			DMS_MAX_BRANCHES);
+		return;
 	}
 	if (s->n == s->cap) {
 		s->cap = s->cap ? s->cap * 2 : 8;
@@ -361,7 +360,7 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 		}
 
 		{
-			char tmp[4];
+			char tmp[DMS_CAP_FOLD_FROM];
 			int tl = ph_u8_encode_cp(cp, tmp);
 			int folded = 0;
 			size_t f;

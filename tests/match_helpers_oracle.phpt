@@ -28,6 +28,9 @@ var_dump(match_rating_compare("Smith", "Xylophone"));
 var_dump(match_rating_compare("CATHRINE", "CATHERI"));
 var_dump(match_rating_compare("MARTINEZ", "MARTIN"));
 var_dump(match_rating_compare("AXBRIDGE", "AXEBRIDG"));
+// Same-length near-miss just under the bar: CTHRN vs THMSN sums to 10
+// (min rating 3) with rating 2, so Commons Codec 1.17.1 isEncodeEquals is false.
+var_dump(match_rating_compare("Catherine", "Thomson"));
 var_dump(match_rating_compare("&A", "&B"));
 
 // Double Metaphone crossing superset vs the oracle helper: Commons Codec's
@@ -59,6 +62,7 @@ bool(false)
 bool(true)
 bool(true)
 bool(true)
+bool(false)
 bool(true)
 int(1)
 int(1)

@@ -8,7 +8,8 @@ name: Release Windows binaries
 # external DLL to bundle.
 #
 # Each matrix build runs PHPT against the release tag before the upload job can
-# publish its binary.
+# publish its binary. Each cell also re-checks codegen freshness, Commons Codec
+# parity, and the fail-closed skip guard, so a bad cell blocks the upload.
 
 on:
   release:
@@ -24,6 +25,7 @@ jobs:
   matrix:
     name: Resolve Windows release matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -42,6 +44,7 @@ jobs:
     name: Build ${{ matrix.php-version }} ${{ matrix.ts }} ${{ matrix.arch }}
     needs: matrix
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
@@ -58,10 +61,76 @@ jobs:
           arch: ${{ matrix.arch }}
           ts: ${{ matrix.ts }}
           run-tests: 'true'
+          args: '--enable-phonetic --enable-phonetic-dev'
 
+      - name: Assert Windows DLL was produced
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path . -Recurse -Filter "php_phonetic.dll" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "::error::php_phonetic.dll not found after Windows build"
+            exit 1
+          }
+          Write-Host "Found $($dll.FullName)"
+      - name: Codegen + arginfo freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f build/php-bin/php.exe || { echo "::error::build/php-bin/php.exe not found"; exit 1; }
+          build/php-bin/php.exe scripts/gen_bmpm_data.php
+          git diff --exit-code src/bmpm_data.h src/dm_data.h
+          build/php-bin/php.exe scripts/check_arginfo.php
+      - name: Commons Codec parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
+          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
+          build/php-bin/php.exe -d "extension=$(cygpath -w "$dll")" scripts/oracle/parity/check.php
+      - name: Re-run tests with fail-closed skip guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # run-tests.php exits 0 on an all-SKIP run, so the builder step above
+          # cannot gate on it. Mirror the Linux counts: fail on any
+          # skip/bork/leak/failure or an empty pass count.
+          phpbin="build/php-bin/php.exe"
+          if [ ! -f "$phpbin" ]; then
+            phpbin="$(command -v php || true)"
+            test -n "$phpbin" || { echo "::error::php.exe not found"; exit 1; }
+          fi
+          runner="build/run-tests.php"
+          if [ ! -f "$runner" ]; then
+            runner="$(find . -name "run-tests.php" -not -path "./vendor/*" | head -n 1)"
+            test -n "$runner" || { echo "::error::run-tests.php not found"; exit 1; }
+          fi
+          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
+          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
+          dllwin="$(cygpath -w "$dll")"
+          runnerwin="$(cygpath -w "$runner")"
+          "$phpbin" -n -d "extension=$dllwin" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load"; exit 1; }
+          export TEST_PHP_EXECUTABLE="$(cygpath -w "$phpbin")"
+          export TEST_PHP_ARGS="-n -d extension=$dllwin"
+          export NO_INTERACTION=1
+          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || true
+          echo "$RESULT"
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          echo "passed=$PASSED failed=$FAILED skipped=$SKIPPED borked=$BORKED leaked=$LEAKED"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi
   release:
     name: Upload binaries to the release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
     # GITHUB_TOKEN defaults to read-only for `contents:` on newer repos;
     # asset upload needs write or it 403s.

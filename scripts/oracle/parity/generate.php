@@ -33,6 +33,7 @@ $modes = [
     'bmpm_ash_exact' => [['bmpm', 'ash', 'exact'], true],
     'bmpm_sep_approx' => [['bmpm', 'sep', 'approx'], true],
     'bmpm_sep_exact' => [['bmpm', 'sep', 'exact'], true],
+    'bmpm_gen_forced' => [['bmpm', 'gen', 'approx', 'english'], true],
 ];
 
 $rows = [];

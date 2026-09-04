@@ -22,4 +22,4 @@ echo $stderr;
 ?>
 --EXPECT--
 int(2)
-incomplete golden: 10 missing pair(s); first: [nysiis_strict] Smith, [nysiis_full] Smith, [mra] Smith
+incomplete golden: 11 missing pair(s); first: [nysiis_strict] Smith, [nysiis_full] Smith, [mra] Smith

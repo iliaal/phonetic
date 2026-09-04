@@ -11,6 +11,7 @@ The matrix covers:
 - Match Rating Approach
 - Daitch-Mokotoff Soundex
 - BMPM generic, Ashkenazi, and Sephardic name types in approximate and exact modes
+- BMPM generic approximate with forced English language
 
 `dmsoundex` and all BMPM results are normalized to sorted `|`-joined sets, so
 the fixture ignores alternative ordering. The word list stays ASCII and avoids
@@ -24,7 +25,7 @@ php -d extension=modules/phonetic.so scripts/oracle/parity/check.php
 ```
 
 The checker needs no Java. It reads the frozen `golden.tsv` and requires the
-complete 11-mode by 50-word matrix.
+complete 12-mode by 57-word matrix.
 
 ## Regenerate from the pinned oracle
 

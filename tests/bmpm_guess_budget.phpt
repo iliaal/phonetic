@@ -5,7 +5,7 @@ phonetic
 --FILE--
 <?php
 // A real nested-prefix name is guessed a handful of times and is unaffected.
-var_dump(is_string(bmpm("de la cruz")));
+echo bmpm("de la cruz"), "\n";
 
 // A 6-separator x 6-prefix chain fans out to ~127 recursive children, each of
 // which re-runs bm_guess_languages -- an O(input x rules) scan -- BEFORE any
@@ -18,6 +18,6 @@ $sep = str_repeat("-", 6);
 bmpm(str_repeat("de" . $sep, 6) . str_repeat("~", 4048));
 ?>
 --EXPECTF--
-bool(true)
+(lakru|lakruS|lakrus|lakruts|latzrus|lazrus|lokru|lokruS|lokrus|lokruts|lotzrus|lozrus)-((kru|kruS|krus|kruts|tzrus|zrus)-(dilakru|dilakruS|dilakrus|dilakruts|dilatzrus|dilazrus|dilokru|dilokruS|dilokrus|dilokruts|dilotzrus|dilozrus))
 
 Fatal error: bmpm(): phonetic: BMPM encode exceeds language-guess budget in %s on line %d

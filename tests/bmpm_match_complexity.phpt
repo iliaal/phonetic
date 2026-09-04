@@ -1,5 +1,5 @@
 --TEST--
-bmpm_match(): disjoint prefix-amplified inputs do not false-match; both operands share one work budget
+bmpm_match(): each operand gets a full per-encode allowance; one pathological operand still fails hard
 --EXTENSIONS--
 phonetic
 --FILE--
@@ -18,16 +18,19 @@ $b = str_repeat("de ", 380) . "baker";
 var_dump(is_string(bmpm($a, BMPM_GENERIC, BMPM_APPROX, "english")));
 var_dump(is_string(bmpm($b, BMPM_GENERIC, BMPM_APPROX, "english")));
 
-// But bmpm_match() shares ONE budget across BOTH operand encodes, so this pair
-// -- each operand within the work cap alone, the two together over it -- fails
-// hard. A per-operand budget (or one that reset work/phonemes/bytes between
-// operands) would wrongly allow it (CR-002 discriminator, work dimension). Last
-// statement: the fatal halts execution.
-bmpm_match($a, $b, BMPM_GENERIC, BMPM_APPROX, "english");
+// Each operand gets a full per-encode allowance, so this pair -- each within
+// the work cap alone -- returns instead of failing hard (disjoint -> false).
+var_dump(bmpm_match($a, $b, BMPM_GENERIC, BMPM_APPROX, "english"));
+
+// But a SINGLE pathological operand still fails hard against its own
+// allowance. Last statement: the fatal halts execution.
+$sep = str_repeat("-", 6);
+bmpm_match(str_repeat("de" . $sep, 6) . str_repeat("aves", 300), "cohen", BMPM_GENERIC, BMPM_APPROX, "english");
 ?>
 --EXPECTF--
 bool(false)
 bool(true)
 bool(true)
+bool(false)
 
 Fatal error: bmpm_match(): phonetic: BMPM encode exceeds work budget in %s on line %d
