@@ -95,19 +95,27 @@ jobs:
           # run-tests.php exits 0 on an all-SKIP run, so the builder step above
           # cannot gate on it. Mirror the Linux counts: fail on any
           # skip/bork/leak/failure or an empty pass count.
-          phpbin="build/php-bin/php.exe"
-          if [ ! -f "$phpbin" ]; then
-            phpbin="$(command -v php || true)"
-            test -n "$phpbin" || { echo "::error::php.exe not found"; exit 1; }
-          fi
+          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
+          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
+          dllwin="$(cygpath -w "$dll")"
+          # build/php-bin/php.exe is one arch/ts flavor and cannot load every
+          # lane's DLL (%1 is not a valid Win32 application on mismatch), so
+          # probe each php.exe under build/ plus PATH and use the first that
+          # loads this lane's DLL.
+          phpbin=""
+          while IFS= read -r cand; do
+            [ -n "$cand" ] || continue
+            if "$cand" -n -d "extension=$dllwin" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' >/dev/null 2>&1; then
+              phpbin="$cand"
+              break
+            fi
+          done < <(find build -name "php.exe" 2>/dev/null; command -v php || true)
+          test -n "$phpbin" || { echo "::error::no php.exe loads $dllwin"; exit 1; }
           runner="build/run-tests.php"
           if [ ! -f "$runner" ]; then
             runner="$(find . -name "run-tests.php" -not -path "./vendor/*" | head -n 1)"
             test -n "$runner" || { echo "::error::run-tests.php not found"; exit 1; }
           fi
-          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
-          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
-          dllwin="$(cygpath -w "$dll")"
           runnerwin="$(cygpath -w "$runner")"
           "$phpbin" -n -d "extension=$dllwin" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
             || { echo "::error::phonetic extension failed to load"; exit 1; }
