@@ -73,21 +73,40 @@ jobs:
             exit 1
           }
           Write-Host "Found $($dll.FullName)"
+      - name: Locate lane php.exe
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The builder layout differs across jobs; probe each php.exe under
+          # build/ plus PATH and keep the first that loads this lane's DLL.
+          dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
+          test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
+          echo "PHONETIC_DLL=$dll" >>"$GITHUB_ENV"
+          while IFS= read -r cand; do
+            [ -n "$cand" ] || continue
+            if "$cand" -n -d "extension=$(cygpath -w "$dll")" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' >/dev/null 2>&1; then
+              echo "PHONETIC_PHP=$cand" >>"$GITHUB_ENV"
+              echo "using $cand"
+              exit 0
+            fi
+          done < <(find build -name "php.exe" 2>/dev/null; command -v php || true)
+          echo "::error::no php.exe loads the lane DLL"; exit 1
       - name: Codegen + arginfo freshness
         shell: bash
         run: |
           set -euo pipefail
-          test -f build/php-bin/php.exe || { echo "::error::build/php-bin/php.exe not found"; exit 1; }
-          build/php-bin/php.exe scripts/gen_bmpm_data.php
+          test -n "${PHONETIC_PHP:-}" || { echo "::error::PHONETIC_PHP not set"; exit 1; }
+          "$PHONETIC_PHP" scripts/gen_bmpm_data.php
           git diff --exit-code src/bmpm_data.h src/dm_data.h
-          build/php-bin/php.exe scripts/check_arginfo.php
+          "$PHONETIC_PHP" scripts/check_arginfo.php
       - name: Commons Codec parity
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${PHONETIC_PHP:-}" || { echo "::error::PHONETIC_PHP not set"; exit 1; }
           dll="$(find "$PWD" -name "php_phonetic.dll" | head -n 1)"
           test -n "$dll" || { echo "::error::php_phonetic.dll not found"; exit 1; }
-          build/php-bin/php.exe -d "extension=$(cygpath -w "$dll")" scripts/oracle/parity/check.php
+          "$PHONETIC_PHP" -d "extension=$(cygpath -w "$dll")" scripts/oracle/parity/check.php
       - name: Re-run tests with fail-closed skip guard
         shell: bash
         run: |
