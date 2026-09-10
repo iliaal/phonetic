@@ -9,7 +9,6 @@ var_dump(bmpm("Smith", BMPM_GENERIC, BMPM_APPROX, "polish"));
 // The prefix branch must keep the forced language instead of re-guessing:
 // both groups carry the polish forms (zmQtx/zmitx), not the auto-detected set.
 echo bmpm("van Smith", BMPM_GENERIC, BMPM_APPROX, "polish"), "\n";
-// ... and therefore differs from the unforced encoding.
 var_dump(bmpm("van Smith", BMPM_GENERIC, BMPM_APPROX, "polish") !== bmpm("van Smith"));
 ?>
 --EXPECT--

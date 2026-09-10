@@ -14,9 +14,9 @@ $o64 = bmpm($w64);
 $o65 = bmpm($w65);
 $o66 = bmpm($w66);
 
-var_dump($o65 !== $o64);            // 65th word changes the result
-var_dump($o66 !== $o65);            // 66th word changes it again
-var_dump(bmpm($w65) === $o65);      // deterministic
+var_dump($o65 !== $o64);
+var_dump($o66 !== $o65);
+var_dump(bmpm($w65) === $o65);
 // the trailing "jones" word contributes its phonemes to every alternative
 var_dump(str_contains($o65, "onis") || str_contains($o65, "oniS"));
 ?>

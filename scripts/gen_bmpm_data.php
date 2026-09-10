@@ -11,17 +11,8 @@
   +----------------------------------------------------------------------+
 */
 
-/*
- * Code generator: parses the vendored Apache Commons Codec Beider-Morse and
- * Daitch-Mokotoff rule files (vendor/commons-codec-bm/) into a self-contained
- * C header (src/bmpm_data.h) consumed by the phonetic engines.
- *
- * The parsers replicate the reference loaders in Commons Codec
- * (Rule.java, Languages.java, Lang.java, DaitchMokotoffSoundex.java) so the
- * generated tables carry exactly the data the upstream algorithm operates on.
- * Pattern / context / phoneme / code columns are kept RAW: the engine compiles
- * the regex and phoneme grammar later -- this script does not interpret them.
- */
+/* Parse vendored Commons Codec rules into BMPM and DM headers.
+ * Match upstream loaders and preserve raw columns for the C engines. */
 
 error_reporting(E_ALL);
 
@@ -63,12 +54,7 @@ function cp_count(string $s): int
     return $n;
 }
 
-/*
- * The C engines size several buffers to fixed caps and would TRUNCATE
- * SILENTLY (mis-encoding, not crashing) if the vendored data ever outgrew
- * them. Regeneration is the gate: fail loudly here instead. Each limit names
- * the buffer it protects.
- */
+/* Reject data exceeding the C engines' fixed buffers before generating headers. */
 const CAP_BM_PATTERN_CPS  = 64;   /* build_ruleset_index: uint32_t b[64] */
 const CAP_BM_CONTEXT_CPS  = 64;   /* build_ctx_R rb[64] (anchor added into heap R); regex_atom_match atoms[64] */
 const CAP_BM_PHONEME_ALTS = 63;   /* parse_phoneme_expr: alts[64]/segs[64] incl. silent alt */
@@ -79,13 +65,8 @@ const CAP_DM_CODE_ALTS    = 8;    /* dms_encode: alts[8][4] */
 const CAP_DM_CODE_LEN     = 3;    /* dms_encode: alts[.][4] NUL-terminated */
 const CAP_DM_FOLD_FROM    = 4;    /* dms_cleanup: char tmp[4] comparison window */
 
-/* bmpm_tok_sep() in src/bmpm.c splits bmpm() output into match tokens on
- * '|', '(', ')' and '-'. That is only sound while no decoded phoneme token
- * contains those characters, so validate each rule's phoneme expression here,
- * mirroring bm_parse_phoneme_expr()/bm_alt_from_seg(): outer parentheses are
- * grammar, a single trailing [bracket] is a language list, everything left is
- * token text that must be separator-free. Language lists must stay limited to
- * the letters and '+' separators bm_parse_lang_list() understands. */
+/* Match tokens must exclude '|()-'; validate the same grammar as
+ * bm_parse_phoneme_expr and bm_alt_from_seg, including language brackets. */
 function check_phoneme_tokens(string $phoneme, string $where): void
 {
     if (str_contains($phoneme, '-')) {
@@ -158,11 +139,7 @@ function strip_quotes(string $s): string
     return $s;
 }
 
-/* Emit a C string literal. Printable ASCII passes through; backslash, double
- * quote and question mark are escaped; everything else (control bytes and the
- * UTF-8 high bytes that pervade this data) becomes a 3-digit octal escape.
- * Octal escapes are bounded to 3 digits, so no greedy-escape ambiguity can
- * arise and the output is charset-independent and -Wall clean. */
+/* Three-digit octal escapes avoid greedy escapes and source-charset dependence. */
 function c_str(string $s): string
 {
     $out = '';
@@ -317,21 +294,8 @@ foreach (NAME_TYPES as $nt) {
     }
 }
 
-/* Language-guessing rules (xx_lang.txt): regex  lang1+lang2  true|false.
- *
- * The accept column must read exactly true/false, and every '+'-separated
- * language token must be a language of that name type: bm_parse_lang_list()
- * in src/bmpm.c silently skips unknown tokens, so an unchecked typo would
- * zero the rule's mask (accept) or leave it wide open (deny) with no signal.
- *
- * Two Commons Codec 1.17.1 rows carry upstream typos whose unknown tokens the
- * Java oracle itself ignores -- ash "^vogel german," and ash "<gimel> ebrew"
- * (U+05D2). Ignored, each rule's mask is empty: under accept it intersects
- * the guess to empty and the engine falls back to "any", exactly what the
- * oracle emits (engine == oracle on "vogel"; see tests/bmpm_ash_vogel.phpt).
- * Normalizing the tokens would DIVERGE from the oracle, and vendor/ is
- * immutable, so the two oracle-pinned tokens are allowlisted and anything
- * else still fails the regen. */
+/* Preserve Commons Codec 1.17.1's two ignored language typos for oracle parity.
+ * Their empty masks fall back to "any"; reject every other unknown token. */
 const LANG_TOKEN_ALLOWLIST = [
     ['ash', '^vogel', 'german,'],
     ['ash', "ג", 'ebrew'],
@@ -678,10 +642,6 @@ $d[] = '#endif /* PHP_DM_DATA_H */';
 $d[] = '';
 $b[] = '#endif /* PHP_BMPM_DATA_H */';
 $b[] = '';
-/* Structural sanity before writing: the section comments are hard-coded, but a
- * future generator edit that leaves a comment unbalanced (or drops the include
- * guard) would emit a header that fails to compile in a confusing way. Fail
- * here with a clear message instead. */
 function write_generated_header(string $path, string $content, string $guard): void
 {
     if (substr_count($content, '/*') !== substr_count($content, '*/')) {
@@ -693,8 +653,7 @@ function write_generated_header(string $path, string $content, string $guard): v
            !== "#endif /* $guard */") {
         fail("generated header is missing its include guard: $path");
     }
-    /* Write to a temp file and rename() into place: an interrupted run must never
-     * leave a half-written header that still compiles into stale tables. */
+    /* Rename atomically so interruption cannot leave a partial header. */
     $tmp = $path . '.tmp';
     if (file_put_contents($tmp, $content) === false) {
         fail("could not write $tmp");

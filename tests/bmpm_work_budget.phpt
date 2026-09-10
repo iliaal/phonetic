@@ -4,18 +4,11 @@ bmpm(): crafted super-linear phoneme-set expansion is bounded by the per-encode 
 phonetic
 --FILE--
 <?php
-// Oracle-faithful behaviour is preserved for real inputs. The multi-space
-// prefix fan-out mirrors Commons Codec exactly (the combined child re-fires the
-// same prefix, one separator char per level), and '-' maps to ' ', so the
-// budget must NOT change any legitimate result -- it only rejects pathological
-// input disproportionate to its size.
+// Repeated separators re-fire the prefix; hyphens become spaces.
 echo bmpm("de  la cohen"), "\n";
 var_dump(bmpm("de la cohen") === bmpm("de-la-cohen"));
 
-// A crafted <=4096-byte input that saturates the three-pass expansion
-// (20 -> <=400 -> <=8000 phonemes, ~12 MB of text) now fails hard instead of
-// returning a phoneme string thousands of times larger than the input
-// (CWE-400). The fatal halts execution, so it is the last statement.
+// Three-pass expansion of this 4096-byte payload exceeds the work budget.
 bmpm(str_repeat("aves", 1024), BMPM_ASHKENAZI);
 ?>
 --EXPECTF--

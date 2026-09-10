@@ -10,13 +10,8 @@
   +----------------------------------------------------------------------+
 */
 
-/* NYSIIS (New York State Identification and Intelligence System) encoder.
- * Reimplementation of the published algorithm; no third-party data. Validated
- * against Apache Commons Codec's Nysiis (strict mode) as parity oracle.
- * Operates on ASCII letters: non-letters and non-ASCII bytes are dropped
- * during cleaning. This is deliberately stricter than Commons Codec's
- * SoundexUtils.clean (which keeps any Unicode Character.isLetter); the
- * ASCII-only contract is documented in the README. */
+/* NYSIIS, reimplemented from the published algorithm; Commons Codec is the oracle.
+ * Unlike Commons Codec, cleaning keeps only ASCII letters. */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -32,7 +27,6 @@ static zend_always_inline int ny_is_vowel(char c)
 	return c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U';
 }
 
-/* Keep ASCII letters only, upper-cased. Returns the kept count. */
 static size_t ny_clean(const char *src, size_t len, char *out)
 {
 	size_t i, n = 0;
@@ -47,16 +41,12 @@ static size_t ny_clean(const char *src, size_t len, char *out)
 	return n;
 }
 
-/* transcodeRemaining: sliding window [prev, curr, next, aNext]. Writes 1-3
- * replacement chars into dst and returns the count. */
 static int ny_transcode(char prev, char curr, char next, char aNext, char *dst)
 {
-	/* EV -> AF */
 	if (curr == 'E' && next == 'V') {
 		dst[0] = 'A'; dst[1] = 'F';
 		return 2;
 	}
-	/* A E I O U -> A */
 	if (ny_is_vowel(curr)) {
 		dst[0] = 'A';
 		return 1;
@@ -72,22 +62,18 @@ static int ny_transcode(char prev, char curr, char next, char aNext, char *dst)
 	default:
 		break;
 	}
-	/* SCH -> SSS */
 	if (curr == 'S' && next == 'C' && aNext == 'H') {
 		dst[0] = 'S'; dst[1] = 'S'; dst[2] = 'S';
 		return 3;
 	}
-	/* PH -> FF */
 	if (curr == 'P' && next == 'H') {
 		dst[0] = 'F'; dst[1] = 'F';
 		return 2;
 	}
-	/* H -> if previous or next is a non-vowel, previous */
 	if (curr == 'H' && (!ny_is_vowel(prev) || !ny_is_vowel(next))) {
 		dst[0] = prev;
 		return 1;
 	}
-	/* W -> if previous is a vowel, previous */
 	if (curr == 'W' && ny_is_vowel(prev)) {
 		dst[0] = prev;
 		return 1;
@@ -110,20 +96,17 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 		return ZSTR_EMPTY_ALLOC();
 	}
 
-	/* First-character rules. Each is anchored at the start and the set is
-	 * mutually exclusive after the first match fires, so the sequential
-	 * replaceFirst chain of the reference reduces to this if/else. All are
-	 * length-preserving, so they edit s in place. */
+	/* Prefix substitutions are mutually exclusive and preserve length. */
 	if (n >= 3 && s[0] == 'M' && s[1] == 'A' && s[2] == 'C') {
-		s[1] = 'C';                               /* MAC -> MCC */
+		s[1] = 'C';
 	} else if (n >= 2 && s[0] == 'K' && s[1] == 'N') {
-		s[0] = 'N';                               /* KN -> NN */
+		s[0] = 'N';
 	} else if (s[0] == 'K') {
-		s[0] = 'C';                               /* K -> C */
+		s[0] = 'C';
 	} else if (n >= 2 && s[0] == 'P' && (s[1] == 'H' || s[1] == 'F')) {
-		s[0] = 'F'; s[1] = 'F';                   /* PH|PF -> FF */
+		s[0] = 'F'; s[1] = 'F';
 	} else if (n >= 3 && s[0] == 'S' && s[1] == 'C' && s[2] == 'H') {
-		s[1] = 'S'; s[2] = 'S';                   /* SCH -> SSS */
+		s[1] = 'S'; s[2] = 'S';
 	}
 
 	/* Last-character rules (EE|IE -> Y, then DT|RT|RD|NT|ND -> D). */
@@ -141,7 +124,6 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 		}
 	}
 
-	/* First character of key = first character of name. */
 	key = emalloc(n + 1);
 	klen = 0;
 	key[klen++] = s[0];
@@ -166,15 +148,15 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 
 	if (klen > 1) {
 		char last = key[klen - 1];
-		if (last == 'S') {                        /* trailing S removed */
+		if (last == 'S') {
 			klen--;
 			last = key[klen - 1];
 		}
 		if (klen > 2 && key[klen - 2] == 'A' && last == 'Y') {
-			key[klen - 2] = key[klen - 1];        /* AY -> Y */
+			key[klen - 2] = key[klen - 1];
 			klen--;
 		}
-		if (last == 'A') {                        /* trailing A removed */
+		if (last == 'A') {
 			klen--;
 		}
 	}
@@ -224,16 +206,12 @@ PHP_FUNCTION(nysiis_match)
 		zend_string_release(ka);
 		RETURN_FALSE;
 	}
-	/* Identical operands: non-empty key matches itself. */
 	if (zend_string_equals(a, b)) {
 		zend_string_release(ka);
 		RETURN_TRUE;
 	}
 	kb = ny_encode(ZSTR_VAL(b), ZSTR_LEN(b), max_length);
 
-	/* NYSIIS yields a single key; two names match when the keys are equal.
-	 * A name that produces no key never matches (consistent with the other
-	 * *_match helpers, where an empty/unencodable input is never a homophone). */
 	if (ZSTR_LEN(kb) > 0) {
 		matched = zend_string_equals(ka, kb);
 	}

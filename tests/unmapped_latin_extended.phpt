@@ -4,16 +4,9 @@ Latin-Extended letters outside the fold tables (U+1E9E, U+0130): pinned behavior
 phonetic
 --FILE--
 <?php
-/* U+1E9E (ẞ, capital sharp S) and U+0130 (İ, Turkish dotted capital I) sit
- * outside the Latin-1 fold tables. Pin the behavior so it cannot be "fixed"
- * into a parity regression:
- *   - double_metaphone MATCHES Apache Commons Codec: Java's toUpperCase leaves
- *     both code points unchanged and the encoder then skips them, so folding
- *     ẞ->SS or İ->I would DIVERGE from the parity oracle.
- *   - match_rating and nysiis DELIBERATELY diverge from Commons: Commons keeps
- *     the raw multibyte character in the codex (MRA "STRAẞE" -> "STRẞ"); we drop
- *     non-ASCII per the documented ASCII-only contract ("STRAẞE" -> "STR").
- *   - Lowercase ß IS handled: Commons uppercases ß->SS and we match it. */
+/* U+1E9E and U+0130 are dropped: oracle parity for Double Metaphone,
+ * deliberate ASCII-only divergence for MRA and NYSIIS.
+ * Double Metaphone and MRA expand lowercase ß. */
 $sharp  = "STRA\u{1E9E}E";     // STRAẞE
 $dotted = "\u{0130}stanbul";   // İstanbul
 

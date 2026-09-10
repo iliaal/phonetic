@@ -18,14 +18,10 @@ foreach ($binary as $fn) {
     try { $fn([], "x"); } catch (\Throwable $e) { echo $fn, " array: ", get_class($e), "\n"; }
 }
 
-// Wrong type for the 2nd argument of every binary comparison function.
 foreach ($binary as $fn) {
     try { $fn("x", []); } catch (\Throwable $e) { echo $fn, " arg2: ", get_class($e), "\n"; }
 }
 
-// Wrong type for the optional trailing arguments (arrays never coerce to the
-// int/string these expect, so each is a TypeError). Covers max_length as well
-// as the BMPM name_type / accuracy / language triple.
 $typed = [
     "double_metaphone max_length"       => fn() => double_metaphone("x", []),
     "nysiis max_length"                 => fn() => nysiis("x", []),

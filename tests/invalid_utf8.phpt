@@ -14,10 +14,8 @@ var_dump(match_rating("x\x80y"));
 // Truncated 3-byte sequence.
 var_dump(dm_soundex("a\xE0\xA0"));
 var_dump(bmpm("\xFF\xFE"));
-// Overlong and non-scalar forms are malformed: the lead byte folds byte-wise
-// (0xC0/0xE0 -> A, 0xED -> I, 0xF4 -> O; all initial vowels map to A) instead of
-// being accepted as the encoded code point. Before the fix these decoded the
-// overlong/surrogate value and dropped it, yielding P|P.
+// Invalid sequences fall back byte-wise; their lead bytes fold to vowels,
+// preserving the initial A rather than dropping it.
 var_dump(double_metaphone("\xC0\xAFB"));      // overlong 2-byte
 var_dump(double_metaphone("\xE0\x80\x80B"));  // overlong 3-byte
 var_dump(double_metaphone("\xED\xA0\x80B"));  // surrogate U+D800

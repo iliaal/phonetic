@@ -10,10 +10,6 @@
   +----------------------------------------------------------------------+
 */
 
-/* Shared UTF-8 and case-folding helpers for the phonetic engines. All
- * functions are static inline: each engine keeps its own copy in its
- * translation unit, so -fvisibility and per-TU inlining are unaffected. */
-
 #ifndef PHONETIC_UTF8_H
 #define PHONETIC_UTF8_H
 
@@ -22,12 +18,8 @@
 
 #include "php.h"
 
-/* Decode the first code point of s (len >= 1 bytes remaining). Stores the
- * sequence's byte length in *clen. Malformed sequences -- truncated, bare
- * continuation, overlong (C0/C1 and overlong 3/4-byte forms), UTF-16 surrogate
- * range, or > U+10FFFF -- decode as a single raw byte: the scan always advances,
- * and bytes 0x80-0xFF fall back to their Latin-1 meaning instead of swallowing
- * the following characters or admitting a non-scalar code point. */
+/* Requires len >= 1; *clen receives the byte length. Invalid UTF-8 consumes
+ * one raw byte as Latin-1, preserving following characters and forward progress. */
 static zend_always_inline uint32_t ph_u8_next(const char *s, size_t len, int *clen)
 {
 	const unsigned char *p = (const unsigned char *) s;
@@ -123,16 +115,9 @@ static inline int ph_u8_encode_cp(uint32_t cp, char *buf)
 	return 4;
 }
 
-/* Lower-case one code point over the Latin ranges the rule data and realistic
- * names use (ASCII, Latin-1 Supplement, Latin Extended-A/B pairs), mirroring
- * Java's lowercase mappings.
- *
- * U+0130 (I with dot above) is special-cased to plain 'i': the even/odd
- * Extended-A pairing would map it to U+0131 (dotless i), but I-with-dot and
- * dotless-i are not a case pair, and U+0131 matches nothing in any rule set,
- * so the letter would silently vanish. Character.toLowerCase(U+0130) is 'i';
- * String.toLowerCase would give "i" + U+0307, whose combining mark also
- * matches nothing — dropping it keeps "Istanbul" and "İstanbul" equivalent. */
+/* Java lowercase mappings for the supported Latin ranges.
+ * U+0130 maps to 'i', not its adjacent U+0131 (dotless i). Java's string
+ * lowercase adds U+0307, which matches no phonetic rule and can be dropped. */
 static inline uint32_t ph_lc_latin(uint32_t c)
 {
 	if (c >= 'A' && c <= 'Z') return c + 32;

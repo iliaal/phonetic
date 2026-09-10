@@ -4,8 +4,7 @@ match_rating(): single-char and non-ASCII parity (byte-vs-char guard, ß expansi
 phonetic
 --FILE--
 <?php
-// A single character (even multi-byte) is trivial input -> no code,
-// matching the reference's name.length() == 1 short-circuit.
+// Count characters, not bytes, for the trivial-input guard.
 var_dump(match_rating("é"));
 var_dump(match_rating("ñ"));
 var_dump(match_rating("A"));
@@ -16,11 +15,9 @@ var_dump(match_rating_compare("é", "è"));
 var_dump(match_rating("Straße"));   // STRS
 // Malformed UTF-8 falls back to Latin-1; bare 0xDF still expands to SS safely.
 var_dump(match_rating(str_repeat("\xDF", 23)));
-// Compare must also survive that expansion; use different raw strings so the
-// raw case-insensitive equality shortcut cannot bypass encoding.
+// Different raw strings bypass the equality shortcut and exercise expansion.
 var_dump(match_rating_compare(str_repeat("\xDF", 23), str_repeat("\xDF", 22) . "S"));
-// Faithful-to-reference tail processing (verified against the Commons Codec
-// algorithm): codes SXSN vs ST clear the rating threshold.
+// Commons Codec rates SXSN vs ST at or above the match threshold.
 var_dump(match_rating_compare("SAXSON", "SAT"));
 ?>
 --EXPECT--

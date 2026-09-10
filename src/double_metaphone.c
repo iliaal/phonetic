@@ -11,11 +11,7 @@
 */
 
 /* Double Metaphone (Lawrence Philips, C/C++ Users Journal, June 2000).
- * Clean-room implementation of the published algorithm; no third-party data.
- * A single forward cursor walks the folded, upper-cased input and appends to a
- * primary and an alternate code buffer that diverge at the documented branch
- * points (silent leading GN/KN/PN/WR/PS, CH, SCH, Slavic/Germanic J and G,
- * Greek/Italian clusters, ...). */
+ * Clean-room implementation of the published algorithm; no third-party data. */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -29,10 +25,8 @@
 #include "php_phonetic.h"
 #include "phonetic_utf8.h"
 
-/* Padding so lookbehind/lookahead can run past both ends without bounds tests;
- * the sentinel '-' never matches a real cluster because no code or target
- * literal contains it. PREPAD covers the deepest lookbehind (position-4),
- * POSTPAD the deepest lookahead (a 6-char window read from position+1). */
+/* The '-' sentinel cannot match a phonetic cluster. Accessors check windows
+ * outside the padding; word-end space comparisons remain explicit. */
 #define DMET_PREPAD  2
 #define DMET_POSTPAD 8
 #define DMET_SENTINEL '-'
@@ -43,7 +37,6 @@ static zend_always_inline int dmet_is_vowel(char c)
 	return c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U' || c == 'Y';
 }
 
-/* Single character at an absolute buffer index; sentinel when out of range. */
 static zend_always_inline char dmet_at(const char *buf, int total, int i)
 {
 	if (i < 0 || i >= total) {
@@ -52,12 +45,7 @@ static zend_always_inline char dmet_at(const char *buf, int total, int i)
 	return buf[i];
 }
 
-/* True when the literal `s` (length `n`) matches the buffer window starting at
- * index `i`. A window that runs past either end of the padded buffer cannot
- * equal a real literal; the published algorithm's word-end space comparisons
- * are handled explicitly at their call sites instead of via padding. The
- * length is passed by the SAT macro as sizeof(literal)-1 so no strlen runs at
- * match time. */
+/* SAT supplies sizeof(literal)-1, avoiding strlen in the matching loop. */
 static zend_always_inline int dmet_string_at(const char *buf, int total, int i, const char *s, size_t n)
 {
 	if (i < 0 || (size_t)i + n > (size_t)total) {
@@ -104,15 +92,8 @@ static const char *dmet_fold_cp(unsigned cp)
 	}
 }
 
-/* Decode UTF-8, ASCII-fold accented Latin, upper-case; spaces are preserved
- * so multi-word input keeps its word boundaries. Malformed sequences decode
- * as single raw bytes (ph_u8_next), so a stray lead byte folds as its Latin-1
- * character instead of swallowing the letters after it.
- *
- * Unmapped non-ASCII code points (outside dmet_fold_cp) are dropped: combining
- * marks and exotic letters vanish rather than blocking clusters. That means a
- * UTF-8 non-letter separator (e.g. NBSP) can join "S"+"CH" into SCH, unlike an
- * ASCII hyphen which is kept and later skipped as a non-letter. Documented. */
+/* Preserve ASCII separators and spaces, but drop unmapped non-ASCII.
+ * Dropping a separator such as NBSP can join S + CH into SCH. */
 static void dmet_fold(const char *src, size_t len, smart_str *out)
 {
 	size_t i = 0;
@@ -123,9 +104,7 @@ static void dmet_fold(const char *src, size_t len, smart_str *out)
 
 		i += (size_t) clen;
 		if (cp < 0x80) {
-			/* ASCII-only uppercasing: libc toupper() honours LC_CTYPE, and a
-			 * userland setlocale() (e.g. tr_TR) would mis-fold the buffer the
-			 * encoder walks. The algorithm is defined over ASCII A-Z. */
+			/* Avoid LC_CTYPE-dependent toupper(): setlocale() must not change encoding. */
 			char u = (cp >= 'a' && cp <= 'z') ? (char) (cp - 'a' + 'A') : (char) cp;
 			smart_str_appendc(out, u);
 		} else {
@@ -155,10 +134,7 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 		return;
 	}
 
-	/* The encoder walks the padded buffer with signed int cursors; a folded
-	 * length that would overflow them must be refused before the narrowing cast
-	 * below undersizes the allocation. Unreachable under any sane memory_limit,
-	 * but folded length can exceed input length for Latin expansions like ß. */
+	/* Check signed cursor capacity after folding, which can expand Latin letters. */
 	if (len > (size_t) DMET_MAX_FOLDED_INPUT) {
 		return;
 	}
@@ -171,10 +147,7 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 
 	start = DMET_PREPAD;
 	end = DMET_PREPAD + (int) len - 1;
-	/* The reference cleanInput() runs Java String.trim(), which strips every
-	 * leading/trailing byte <= 0x20 (space, tab, newline, CR, ...), not only
-	 * ASCII space. The folded buffer is pure ASCII so the unsigned compare
-	 * never matches a folded high byte, and the pad sentinel ('-') is > 0x20. */
+	/* Java String.trim() removes all bytes <= 0x20, including controls. */
 	while (start <= end && (unsigned char) buf[start] <= ' ') {
 		start++;
 	}
@@ -200,7 +173,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 #define B(i)       dmet_at(buf, total, (i))
 #define SAT(i, s)  dmet_string_at(buf, total, (i), "" s, sizeof(s) - 1)
 
-	/* check_word_start: skip a silent leading cluster, and map an initial X to S. */
 	pos = start;
 	if (SAT(pos, "GN") || SAT(pos, "KN") || SAT(pos, "PN")
 			|| SAT(pos, "WR") || SAT(pos, "PS")) {
@@ -212,9 +184,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 		pos++;
 	}
 
-	/* Every branch assigns the (pc, sc, adv) action for the current position.
-	 * Non-letter bytes are handled by the switch default, which skips them
-	 * (emit nothing, advance one). */
 	pc = NULL;
 	sc = NULL;
 	adv = 1;
@@ -709,11 +678,7 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 				break;
 
 			default:
-				/* Non-letter byte that survived folding (digit, punctuation,
-				 * hyphen): emit nothing and advance one, like a space. Commons
-				 * Codec's DoubleMetaphone does `default: index++`. The old
-				 * "carry the previous action" duplicated the prior phoneme
-				 * ("a1b2" -> AAPP not AP; "Smith-Jones" != "Smith Jones"). */
+				/* Clear the prior action so punctuation cannot repeat its phoneme. */
 				pc = sc = NULL;
 				adv = 1;
 				break;
@@ -802,9 +767,7 @@ PHP_FUNCTION(double_metaphone)
 		slen = ZSTR_LEN(secondary.s);
 	}
 
-	/* max_length <= 0 means "no limit": emit the full untruncated codes.
-	 * Early-exit in dmet_encode stops once both buffers reach the cap; this
-	 * still trims multi-char emissions that overshot. */
+	/* Trim multi-character emissions that overshoot the encoder's early-exit cap. */
 	if (max_length > 0) {
 		if (plen > (size_t) max_length) {
 			plen = (size_t) max_length;
@@ -822,7 +785,6 @@ PHP_FUNCTION(double_metaphone)
 	smart_str_free(&secondary);
 }
 
-/* Two non-empty codes of equal (capped) length comparing identical. */
 static zend_always_inline int dmet_code_eq(const smart_str *x, const smart_str *y, size_t cap)
 {
 	size_t xl = x->s ? ZSTR_LEN(x->s) : 0;
@@ -864,9 +826,8 @@ PHP_FUNCTION(double_metaphone_match)
 	pa_set = pa.s != NULL && ZSTR_LEN(pa.s) > 0;
 	sa_set = sa.s != NULL && ZSTR_LEN(sa.s) > 0;
 
-	/* No usable code at all → never matches. Testing only the primary would drop
-	 * the strength-1 crossing of an alternate-only code ("-EW" encodes to ""/"F")
-	 * and make the helper answer differently per argument order. */
+	/* An alternate-only code ("-EW" -> ""/"F") can match; checking only the
+	 * primary would make the result depend on argument order. */
 	if (!pa_set && !sa_set) {
 		smart_str_free(&pa);
 		smart_str_free(&sa);

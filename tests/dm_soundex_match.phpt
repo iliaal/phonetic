@@ -4,11 +4,11 @@ dm_soundex_match(): true when the Daitch-Mokotoff code sets intersect
 phonetic
 --FILE--
 <?php
-var_dump(dm_soundex_match("Moskowitz", "Moskovitz")); // same code
-var_dump(dm_soundex_match("Peterson", "Peters"));      // disjoint
-var_dump(dm_soundex_match("Smith", "Xylophone"));      // disjoint
-var_dump(dm_soundex_match("", ""));                     // empty -> false
-var_dump(dm_soundex_match("Katz", "Katz"));            // identical
+var_dump(dm_soundex_match("Moskowitz", "Moskovitz"));
+var_dump(dm_soundex_match("Peterson", "Peters"));
+var_dump(dm_soundex_match("Smith", "Xylophone"));
+var_dump(dm_soundex_match("", ""));
+var_dump(dm_soundex_match("Katz", "Katz"));
 // Multi-code: first codes differ (097400 vs 097500) but intersect on 097500.
 var_dump(dm_soundex("Auerbach"));
 var_dump(dm_soundex("Oerback"));

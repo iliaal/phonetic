@@ -10,12 +10,8 @@
   +----------------------------------------------------------------------+
 */
 
-/* Match Rating Approach (Western Airlines, 1977). Reimplementation of the
- * published algorithm; validated against Apache Commons Codec's
- * MatchRatingApproachEncoder as parity oracle. match_rating() returns the
- * codex; match_rating_compare() applies the MRA homophone comparison
- * (isEncodeEquals). Operates on ASCII; the Latin-1/Latin-Extended accent set
- * the reference folds is reproduced below as a plain character correspondence. */
+/* Match Rating Approach (Western Airlines, 1977), reimplemented from the
+ * published algorithm; Commons Codec is the parity oracle. */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -33,8 +29,7 @@ static zend_always_inline int mra_is_vowel(char c)
 	return c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U';
 }
 
-/* Accented code point -> ASCII letter (uppercase result applied by caller).
- * Mirrors Commons Codec's PLAIN_ASCII/UNICODE correspondence table. */
+/* Commons Codec's PLAIN_ASCII/UNICODE correspondence; returns uppercase ASCII. */
 static char mra_deaccent(uint32_t cp)
 {
 	switch (cp) {
@@ -86,10 +81,7 @@ static int mra_is_space(unsigned char c)
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-/* True when the string holds at most one code point (empty or a single
- * character). The reference's trivial-input guard is `name.length() == 1`,
- * i.e. character count, not byte count — so a single multi-byte letter must
- * still count as one character, not encode as if it were several. */
+/* Count code points so a multibyte letter remains trivial input. */
 static int mra_trivial(const char *s, size_t len)
 {
 	size_t i = 0, cps = 0;
@@ -124,20 +116,16 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 			}
 			out[n++] = (c >= 'a' && c <= 'z') ? (char) (c - ('a' - 'A')) : (char) c;
 		} else if (cp == 0x00DF) {
-			/* The reference upper-cases (ENGLISH) before folding accents, and
-			 * ß upper-cases to "SS"; reproduce that one expansion here. Other
-			 * case-expanding code points are out of scope (ASCII/Latin only). */
+			/* Commons Codec uppercases before accent folding; ß expands to SS.
+			 * Other case expansions are unsupported. */
 			out[n++] = 'S';
 			out[n++] = 'S';
 		} else {
 			char a = mra_deaccent(cp);
 			if (a != 0) {
-				out[n++] = a;        /* table already yields uppercase */
+				out[n++] = a;
 			}
-			/* Unmapped non-ASCII is dropped. Deliberate divergence from Commons
-			 * Codec, which retains the raw character in the codex (e.g. U+1E9E
-			 * ẞ -> "STRẞ", U+0130 İ -> "İİSNBL"); we keep the codex ASCII-only,
-			 * as documented. Pinned in tests/unmapped_latin_extended.phpt. */
+			/* Drop unmapped non-ASCII to keep the codex ASCII-only; Commons Codec retains it. */
 		}
 	}
 
@@ -169,10 +157,7 @@ static size_t mra_remove_vowels(char *buf, size_t len)
 	return n;
 }
 
-/* Collapse each doubled consonant to a single letter. The reference's
- * DOUBLE_CONSONANT list is exactly the 21 non-vowel letters, so a single
- * left-to-right pass that drops the second of any equal consonant pair matches
- * its per-letter String.replace sweep. */
+/* Match the reference's non-overlapping consonant pairs: BBB becomes BB, not B. */
 static size_t mra_remove_doubles(char *buf, size_t len)
 {
 	size_t i = 0, n = 0;
@@ -190,7 +175,6 @@ static size_t mra_remove_doubles(char *buf, size_t len)
 	return n;
 }
 
-/* If longer than 6, keep first 3 + last 3. */
 static size_t mra_first3last3(char *buf, size_t len)
 {
 	if (len > 6) {
@@ -227,7 +211,6 @@ static char *mra_encode(const char *src, size_t len, size_t *outlen)
 	return buf;
 }
 
-/* ASCII case-insensitive equality of two raw strings. */
 static int mra_iequals(const char *a, size_t al, const char *b, size_t bl)
 {
 	size_t i;
@@ -250,8 +233,7 @@ static int mra_iequals(const char *a, size_t al, const char *b, size_t bl)
  * mirrored positions; return 6 minus the longer remaining length. */
 static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 {
-	/* Both inputs have already passed getFirst3Last3, so na, nb <= 6; a stack
-	 * scratch buffer avoids two heap alloc/free pairs per comparison. */
+	/* mra_first3last3 bounds each input to six bytes. */
 	char ca[8], cb[8];
 	int n1 = (int) na - 1;
 	int n2 = (int) nb - 1;
@@ -281,7 +263,6 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 	for (i = 0; i < (int) na; i++) if (ca[i] != ' ') la++;
 	for (i = 0; i < (int) nb; i++) if (cb[i] != ' ') lb++;
 	longer = la > lb ? la : lb;
-	/* longer <= 6: both codices already passed getFirst3Last3. */
 	return 6 - longer;
 }
 
@@ -295,7 +276,6 @@ PHP_FUNCTION(match_rating)
 		Z_PARAM_STR(input)
 	ZEND_PARSE_PARAMETERS_END();
 
-	/* Trivial input (empty / single character) has no code. */
 	if (mra_trivial(ZSTR_VAL(input), ZSTR_LEN(input))) {
 		RETURN_EMPTY_STRING();
 	}
@@ -317,24 +297,21 @@ PHP_FUNCTION(match_rating_compare)
 		Z_PARAM_STR(b)
 	ZEND_PARSE_PARAMETERS_END();
 
-	/* Trivial input never compares. */
 	if (mra_trivial(ZSTR_VAL(a), ZSTR_LEN(a)) || mra_trivial(ZSTR_VAL(b), ZSTR_LEN(b))) {
 		RETURN_FALSE;
 	}
-	/* Identical (case-insensitive) raw inputs are homophones by definition. */
+	/* Compare raw inputs before cleaning, including punctuation-only strings. */
 	if (mra_iequals(ZSTR_VAL(a), ZSTR_LEN(a), ZSTR_VAL(b), ZSTR_LEN(b))) {
 		RETURN_TRUE;
 	}
 
 	na = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
-	/* Empty first encode: skip the second pipeline (same as other *_match). */
 	if (nal == 0) {
 		efree(na);
 		RETURN_FALSE;
 	}
 	nb = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
 
-	/* An input that cleans away to nothing has no comparable code. */
 	if (nbl == 0) {
 		efree(na);
 		efree(nb);

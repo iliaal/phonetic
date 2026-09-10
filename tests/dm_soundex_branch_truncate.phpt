@@ -4,10 +4,7 @@ dm_soundex(): fork-alternation input saturates the branch set and truncates to t
 phonetic
 --FILE--
 <?php
-// Same fork-alternation shape as dm_soundex_branch_cap.phpt: the live branch
-// set saturates within ~100 bytes. Past 128 distinct codes the set keeps the
-// first 128 in insertion order, drops later ones, and keeps encoding instead
-// of failing, so the call returns a deterministic truncated set.
+// Pin the full insertion order of the retained 128 branches.
 $e = "\xC4\x99"; // U+0119 e-ogonek
 $t = "\xC5\xA3"; // U+0163 t-cedilla
 $cyc = str_replace(" ", "", "{$e}j{$e}j{$e}j{$e}{$t}c{$t}c{$t}rsc{$t}crsc{$t}cccc c{$e}j{$e}j{$e}l{$e}j{$e}cc");

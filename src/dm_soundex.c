@@ -29,17 +29,9 @@
 
 #define DMS_MAX 6
 
-/* A name is short; this generous byte ceiling never rejects a real one but
- * bounds the per-character branch work, so untrusted input can't turn
- * dm_soundex into a multi-second CPU sink. The hashed dedup keeps everything
- * up to the cap fast; the cap is the hard backstop. */
+/* Bound per-character branching work on untrusted input. */
 #define DMS_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
-/* ---------------------------------------------------------------------- */
-/* UTF-8 helpers (decode/encode/lowercase live in phonetic_utf8.h)        */
-/* ---------------------------------------------------------------------- */
-
-/* Number of code points in a UTF-8 byte run. */
 static int dms_u8_cplen(const char *s, size_t len)
 {
 	size_t i;
@@ -52,11 +44,7 @@ static int dms_u8_cplen(const char *s, size_t len)
 	return n;
 }
 
-/* Java Character.isWhitespace: ASCII control whitespace plus the Unicode space
- * separators, excluding the no-break spaces. The full set is exactly these 25
- * code points — notably U+0085 (NEXT LINE) is *not* among them, unlike Python's
- * str.isspace() or .NET's char.IsWhiteSpace, so Commons Codec's cleanup keeps
- * it and so must we. */
+/* Match Java Character.isWhitespace: exclude no-break spaces and U+0085. */
 static int dms_is_ws(uint32_t cp)
 {
 	if (cp >= 0x09 && cp <= 0x0D) return 1;
@@ -71,10 +59,6 @@ static int dms_is_ws(uint32_t cp)
 	return 0;
 }
 
-/* ---------------------------------------------------------------------- */
-/* Branch set                                                             */
-/* ---------------------------------------------------------------------- */
-
 typedef struct {
 	char code[DMS_MAX + 1];   /* accumulated digits, NUL-terminated */
 	int  len;
@@ -82,25 +66,12 @@ typedef struct {
 	int  last_null;           /* 1 while no replacement has been applied yet */
 } dms_branch;
 
-/* Normal (short) names fork the set to only a handful of distinct codes, where
- * the per-push linear strcmp scan is cheaper than maintaining a hash, so they
- * never allocate or touch it. Once the set passes this threshold the O(set)
- * scan per push would become an O(set^2)-per-character CPU sink, so we switch to
- * an open-addressed index; that keeps the dedupe cheap all the way up to the
- * DMS_MAX_BRANCHES ceiling below. */
+/* Linear scans avoid hash overhead for small sets; hash larger sets to
+ * avoid quadratic deduplication. */
 #define DMS_HASH_MIN 16
 
-/* Hard ceiling on the live branch set. The input length is capped
- * (DMS_MAX_INPUT) but the per-character sweep is O(|set| x alts), and the set
- * size is bounded only by the number of distinct codes the input can construct
- * -- attacker-controlled, not engine-bounded. Fork-alternation input (the very
- * letters the DM rules exist for: c/ch/ck/rs/rz/j and the Polish/Romanian
- * ogonek/cedilla rules) reaches ~1717 distinct codes and saturates within ~100
- * bytes, so a 4096-byte input burns hundreds of ms of pure CPU per call
- * (CWE-400). Past this ceiling the set keeps the first 128 distinct codes in
- * insertion order, drops later ones, and keeps encoding -- output stays
- * deterministic, and real names (single-digit sets: the branching tests yield
- * 2, the longest real name measured 8) never reach it. */
+/* Bound per-character work by retaining the first 128 distinct branches
+ * in insertion order; later branches are discarded deterministically. */
 #define DMS_MAX_BRANCHES 128
 
 typedef struct {
@@ -176,12 +147,12 @@ static void dms_set_push(dms_set *s, const dms_branch *br)
 		s->cap = s->cap ? s->cap * 2 : 8;
 		s->b = erealloc(s->b, (size_t) s->cap * sizeof(dms_branch));
 		if (s->hash) {
-			dms_hash_build(s);   /* resize + reindex after b[] moved */
+			dms_hash_build(s);
 		}
 	}
 	s->b[s->n] = *br;
 	if (!s->hash && s->n + 1 >= DMS_HASH_MIN) {
-		dms_hash_build(s);       /* index the existing entries once we get big */
+		dms_hash_build(s);
 	}
 	if (s->hash) {
 		unsigned slot = dms_code_hash(br->code) & (unsigned) s->hmask;
@@ -263,9 +234,7 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 		br->code[br->len] = '\0';
 	}
 
-	/* lastReplacement is always updated, even when not appended. The guard
-	 * above keeps the copy within lastrep's fixed size; like the split loop,
-	 * it fails hard instead of silently truncating a corrupt replacement. */
+	/* Update lastrep even when no digits were appended; oversized rules are corrupt. */
 	if (replen > sizeof(br->lastrep) - 1) {
 		zend_error_noreturn(E_CORE_ERROR,
 			"phonetic: DM rule code alternative exceeds %d chars",
@@ -275,14 +244,8 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 	br->last_null = 0;
 }
 
-/* ---------------------------------------------------------------------- */
-/* MINIT-built first-byte dispatch index over dm_rules                     */
-/* ---------------------------------------------------------------------- */
-
-/* Precomputed pattern byte-length and code-point length per rule, plus rule
- * indices bucketed by the pattern's first byte. dms_encode then scans only the
- * rules that can match at the current position instead of all of dm_rules, and
- * never recomputes strlen()/cplen() in the hot loop. Read-only after MINIT. */
+/* Read-only after MINIT: cached lengths and first-byte buckets avoid
+ * rescanning all rules and decoding pattern lengths for each input character. */
 static int *g_dms_plen;        /* [dm_rules_count] strlen(pattern) */
 static int *g_dms_pcplen;      /* [dm_rules_count] code-point length */
 static int *g_dms_order;       /* [dm_rules_count] rule indices grouped by first byte */
@@ -332,10 +295,6 @@ void dms_mshutdown(void)
 	if (g_dms_order)  { pefree(g_dms_order, 1);  g_dms_order = NULL; }
 }
 
-/* ---------------------------------------------------------------------- */
-/* Encoder                                                                */
-/* ---------------------------------------------------------------------- */
-
 /* Clean the input: drop whitespace, lower-case, then apply accent/ligature
  * folding. Output is a UTF-8 byte run. */
 static void dms_cleanup(const char *s, size_t len, smart_str *out)
@@ -351,7 +310,6 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 			continue;
 		}
 
-		/* Character.toLowerCase over the Latin ranges the rule data uses */
 		cp = ph_lc_latin(cp);
 
 		if (cp < 0x80) {
@@ -384,12 +342,8 @@ static int dms_is_vowel(char c)
 	return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
 }
 
-/* Run the DM soundex over the cleaned buffer, collecting distinct 6-digit
- * codes into `out` in branch insertion order. Returns 1 when at least one
- * rule matched (the input actually coded), 0 when nothing did — the padded
- * all-zero code from unencodable input is oracle parity for dm_soundex()
- * itself, but must not make dm_soundex_match() call two such inputs
- * homophones. */
+/* Return whether any rule matched. An unencodable input still emits 000000
+ * for oracle parity, but that sentinel must not count as a match. */
 static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 {
 	dms_set setA, setB;
@@ -417,9 +371,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		int nalts;
 		int force;
 
-		/* Longest pattern matching at this position. Only rules whose pattern
-		 * starts with the current byte can match, so scan that bucket alone and
-		 * read the pre-stored byte/code-point lengths instead of recomputing. */
+		/* Choose the longest matching pattern within this first-byte bucket. */
 		{
 			unsigned char fb = (unsigned char) buf[index];
 			int off = g_dms_off[fb], cnt = g_dms_cnt[fb], t;
@@ -455,10 +407,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 			field = dms_is_vowel(nx) ? best->before_vowel : best->default_code;
 		}
 
-		/* Split the replacement field on '|' into branch alternatives. Both
-		 * caps are generator-enforced; over-cap data means a corrupt or
-		 * hand-edited table, so fail hard like the BMPM engine rather than
-		 * silently clipping the code set. */
+		/* The generator enforces both caps; exceeding either means corrupt rule data. */
 		nalts = 0;
 		{
 			const char *p = field;
@@ -491,8 +440,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 
 		force = (last_char == 'm' && cp == 'n') || (last_char == 'n' && cp == 'm');
 
-		/* ping-pong between two sets: reset keeps the previous generation's
-		 * allocations, so a length-L input costs O(1) set allocations, not O(L) */
+		/* Reuse both generations' allocations across input characters. */
 		dms_set_reset(next);
 		for (i = 0; i < cur->n; i++) {
 			int ai;
@@ -543,10 +491,6 @@ static int dms_codes(zend_string *input, dms_set *out)
 	smart_str_free(&cleaned);
 	return coded;
 }
-
-/* ---------------------------------------------------------------------- */
-/* PHP function                                                           */
-/* ---------------------------------------------------------------------- */
 
 PHP_FUNCTION(dm_soundex)
 {
@@ -599,16 +543,12 @@ PHP_FUNCTION(dm_soundex_match)
 		RETURN_THROWS();
 	}
 
-	/* An input that never matched a rule still yields the padded "000000"
-	 * sentinel from the encoder (oracle parity for dm_soundex()); requiring
-	 * both sides to have actually coded keeps two unencodable inputs from
-	 * comparing as homophones, consistent with the other *_match helpers. */
+	/* Require a rule match on both sides; padded 000000 alone is not a homophone. */
 	ca = dms_codes(a, &sa);
 	if (!ca) {
 		dms_set_free(&sa);
 		RETURN_FALSE;
 	}
-	/* Identical operands: one coded encode is enough (set intersects itself). */
 	if (zend_string_equals(a, b)) {
 		dms_set_free(&sa);
 		RETURN_TRUE;

@@ -70,10 +70,7 @@ echo
 
 echo "---- 6. Verify extension loads ----"
 if [ "$PIE_OK" = "0" ]; then
-    # The whole point of this smoke test is the `pie install` path. A manual
-    # phpize fallback that silently rescues a broken PIE/Packagist/prebuilt-asset
-    # install would report PASSED while hiding the exact regression under test.
-    # Fail hard by default; the manual fallback is opt-in for local iteration.
+    # Manual fallback is opt-in: it cannot validate a failed PIE install.
     if [ "${ALLOW_MANUAL_FALLBACK:-0}" != "1" ]; then
         echo "   *** pie install iliaal/phonetic FAILED (PIE_OK=0). ***" >&2
         echo "   *** This smoke test exercises the PIE/Packagist path; not masking it with a manual build. ***" >&2

@@ -4,16 +4,10 @@ bmpm(): multi-separator prefix fan-out cannot run unbudgeted language-guess scan
 phonetic
 --FILE--
 <?php
-// A real nested-prefix name is guessed a handful of times and is unaffected.
 echo bmpm("de la cruz"), "\n";
 
-// A 6-separator x 6-prefix chain fans out to ~127 recursive children, each of
-// which re-runs bm_guess_languages -- an O(input x rules) scan -- BEFORE any
-// phonemes are produced. With an UNMATCHED payload ('~' matches no phoneme
-// rule) the phoneme-count/byte/copy caps barely move, yet the 127 guesses over
-// a ~4 KB input are real CPU. That language-guess work is now charged to the
-// same per-encode budget, so the fan-out fails hard rather than burning CPU
-// disproportionate to the input (CWE-400). Last statement: the fatal halts.
+// '~' matches no phoneme rule, isolating language-guess work.
+// Six separators let each prefix re-fire across the 64-leaf recursion tree.
 $sep = str_repeat("-", 6);
 bmpm(str_repeat("de" . $sep, 6) . str_repeat("~", 4048));
 ?>

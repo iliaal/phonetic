@@ -8,7 +8,6 @@ phonetic
 var_dump(dm_soundex("Mnemonic"));
 var_dump(dm_soundex("Amnon"));
 
-// Single required string argument.
 try {
     dm_soundex();
 } catch (\ArgumentCountError $e) {

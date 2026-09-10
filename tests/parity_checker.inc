@@ -1,12 +1,6 @@
 <?php
-/* Runs scripts/oracle/parity/check.php in a child PHP and returns
- * [exit code, stdout, stderr].
- *
- * The built extension is not at a fixed path across runners: POSIX builds put
- * it at modules/phonetic.so, php-windows-builder at build\php_phonetic.dll.
- * Both CI paths export TEST_PHP_ARGS whose extension= directive is the last
- * token, so reuse it and keep modules/phonetic.so as the fallback for direct
- * local runs where TEST_PHP_ARGS is unset. */
+/* Both CI lanes put extension= last in TEST_PHP_ARGS; reuse its .so/.dll path.
+ * Return [exit code, stdout, stderr]. */
 
 function parity_check_run(string $golden, string $words): array
 {

@@ -19,9 +19,7 @@ try {
 } catch (\ValueError $e) {
     echo $e->getMessage(), "\n";
 }
-// $language is a raw PHP string: the echoed preview is binary-safe (embedded
-// NUL and other non-printables render as '?') and bounded to 32 bytes, so an
-// over-long invalid language cannot blow the exception message up to its size.
+// Raw language strings need a bounded preview with printable NUL replacement.
 try {
     bmpm_match("a", "b", BMPM_GENERIC, BMPM_APPROX, "bad\0lang");
 } catch (\ValueError $e) {
