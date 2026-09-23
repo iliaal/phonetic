@@ -2,8 +2,8 @@
 
 Apache Commons Codec **1.17.1** (Apache-2.0) is the parity oracle for this
 extension's golden test vectors. It ships the same BMPM / Daitch-Mokotoff rule
-data we vendor under `vendor/commons-codec-bm/`, with zero GPL contact — the
-GPL BMPM reference and the abydos port are never consulted.
+data we vendor under `vendor/commons-codec-bm/`. The GPL BMPM reference and
+the abydos port are never consulted.
 
 The jar is fetched, not committed (see `.gitignore` here).
 

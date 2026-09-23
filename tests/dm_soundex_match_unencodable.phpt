@@ -4,7 +4,7 @@ dm_soundex_match(): unencodable input ("000000") never matches
 phonetic
 --FILE--
 <?php
-// Both sides encode to the degenerate "000000" — that must NOT count as a match.
+// Both sides encode to the degenerate "000000", which must not count as a match.
 var_dump(dm_soundex_match("Иванов", "Петров"));
 var_dump(dm_soundex_match("12345", "苏州"));
 var_dump(dm_soundex_match(" ", "\t"));

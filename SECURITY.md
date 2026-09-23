@@ -1,11 +1,11 @@
 # Security policy
 
-phonetic is a pure-C PHP extension that encodes names into phonetic
-keys (Double Metaphone, Beider-Morse, Daitch-Mokotoff Soundex, NYSIIS,
-Match Rating) and compares them. Every entry point takes arbitrary
-user-controlled strings straight into hand-written C string-processing
-code, so the realistic threat surface is memory-safety bugs in the
-encoders and CPU-exhaustion DoS from pathological input.
+phonetic is a C PHP extension that encodes names into phonetic keys
+(Double Metaphone, Beider-Morse, Daitch-Mokotoff Soundex, NYSIIS, Match
+Rating) and compares them. Every entry point passes arbitrary
+user-controlled strings to hand-written C string code, so the main risks
+are memory-safety bugs in the encoders and CPU-exhaustion DoS from
+pathological input.
 
 ## Supported versions
 
@@ -51,22 +51,24 @@ In scope:
   the BMPM `name_type` / `accuracy` / `language` arguments.
 - Uncontrolled CPU or memory consumption from crafted input
   disproportionate to its size, such as super-linear BMPM expansion or
-  runaway recursion. `bmpm()`, `bmpm_match()`, `dm_soundex()`, and
-  `dm_soundex_match()` reject inputs over 4096 bytes; those caps and the
-  BMPM recursion bound are security boundaries, and bypasses of them are
-  in scope. `bmpm()` / `bmpm_match()` additionally bound each encode's
-  phoneme set, output size, phoneme-text copying, and language-guess
-  work, and `dm_soundex()` / `dm_soundex_match()` bound the live branch
-  set; these per-encode budgets are security boundaries too, so crafted
-  input that drives disproportionate CPU or memory up to or past them is
-  in scope.
+  runaway recursion. These limits are security boundaries, and bypasses
+  are in scope:
+  - the 4096-byte input cap on `bmpm()`, `bmpm_match()`, `dm_soundex()`,
+    and `dm_soundex_match()`
+  - the BMPM recursion bound
+  - the per-encode budgets on BMPM phoneme sets, output size,
+    phoneme-text copying, and language-guess work
+  - the Daitch-Mokotoff live branch-set cap
+
+  Crafted input that drives disproportionate CPU or memory up to or past
+  these budgets is also in scope.
 - Arginfo / ZPP mismatches that cause undefined behavior reachable from
   PHP.
 
 Out of scope:
 
-- Phonetically "wrong" output. The encoders are heuristics; a key you
-  disagree with is a correctness question, not a vulnerability.
+- Phonetically "wrong" output. The encoders are heuristics; report a key
+  you disagree with as a regular bug.
 - Passing untrusted input to uncapped encoders without your own length
   limits. Bound input size at the application layer as you would for
   any string-processing routine.

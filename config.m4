@@ -13,9 +13,9 @@ if test "$PHP_PHONETIC" != "no"; then
     AC_MSG_ERROR([phonetic requires PHP 8.1.0 or later (found $PHP_VERSION_ID)])
   fi
 
-  dnl All phonetic data (Beider-Morse + Daitch-Mokotoff rule tables, vendored
-  dnl from Apache Commons Codec under Apache-2.0) is compiled in via the
-  dnl generated src/bmpm_data.h, so there is no external library dependency.
+  dnl Beider-Morse and Daitch-Mokotoff rule tables (vendored from Apache Commons
+  dnl Codec, Apache-2.0) are compiled in via the generated src/bmpm_data.h and
+  dnl src/dm_data.h, so there is no external library dependency.
   PHONETIC_SOURCES="phonetic.c src/double_metaphone.c src/bmpm.c src/dm_soundex.c src/nysiis.c src/match_rating.c"
 
   dnl -Wall -Wextra are on by default so regressions get caught in every local

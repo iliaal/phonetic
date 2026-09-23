@@ -1,12 +1,10 @@
 # phonetic
 
-Native phonetic matching for PHP: **Double Metaphone**, **Beider-Morse Phonetic Matching (BMPM)**, **Daitch-Mokotoff Soundex**, **NYSIIS**, and **Match Rating Approach**, the phonetic name-matching encoders that PHP core does not ship. It also ships comparison helpers that answer "do these two names sound alike?" directly.
-
-PHP core has `soundex()` and `metaphone()`, but not these, which are the standard tools for fuzzy name matching, record linkage, and genealogy search across spelling and transliteration variants.
+Native phonetic name matching for PHP: Double Metaphone, Beider-Morse Phonetic Matching (BMPM), Daitch-Mokotoff Soundex, NYSIIS, and Match Rating Approach. PHP core ships only `soundex()` and `metaphone()`; these are the encoders used for fuzzy name matching, record linkage, and genealogy search across spelling and transliteration variants. Comparison helpers answer "do these two names sound alike?" directly.
 
 ![phonetic](images/phonetic-hero.jpg)
 
-## Quick Start
+## Quick start
 
 Install via [PIE](https://github.com/php/pie) (requires PHP 8.1 or later):
 
@@ -14,7 +12,7 @@ Install via [PIE](https://github.com/php/pie) (requires PHP 8.1 or later):
 pie install iliaal/phonetic
 ```
 
-Then ask whether two names sound alike, no userland matching logic required:
+Then check whether two names sound alike:
 
 ```php
 double_metaphone_match("Catherine", "Kathryn");   // 2  (strong match)
@@ -34,7 +32,7 @@ bmpm_match("Peterson", "Petersen");                // true
 | Relative speed | fast (1.0x) | slowest (~60x) | middle (~2.3x) | fast (0.42x) | fastest (0.24x) |
 | Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data | clean-room published algorithm | clean-room published algorithm |
 
-Rule of thumb: reach for Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy where it is the field standard. **NYSIIS** and **Match Rating Approach** are lighter, single-key English/American encoders, useful as alternate index keys or a second opinion alongside Double Metaphone.
+Use Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy, where it is the field standard. NYSIIS and Match Rating Approach are lighter single-key English/American encoders, useful as alternate index keys or as a second check alongside Double Metaphone.
 
 ## API
 
@@ -67,10 +65,10 @@ bmpm("Jackson");                           // "iakson|iaksun|...|zokson"
 bmpm("Garcia", BMPM_SEPHARDIC, BMPM_EXACT);// "garsia|gartSa"
 ```
 
-Empty `$language` auto-detects; pass an **exact lowercase** language token for
-that name type (e.g. `"russian"`, `"english"`) to force it. Tokens are
+Empty `$language` auto-detects. To force a language, pass its exact lowercase
+token for that name type (e.g. `"russian"`, `"english"`). Tokens are
 name-type-specific (GENERIC has the largest set; ASHKENAZI/SEPHARDIC are
-subsets). The label `"any"` is not forceable — see Notes.
+subsets). You can't force the label `"any"`; see Notes.
 
 Constants (numeric values):
 
@@ -82,11 +80,11 @@ Constants (numeric values):
 | `BMPM_APPROX` | 10 | accuracy |
 | `BMPM_EXACT` | 20 | accuracy |
 
-Accuracy values are deliberately disjoint from name-type values so a misplaced constant such as `bmpm($s, BMPM_APPROX)` is rejected instead of silently selecting a name type. Prefer the constant names over hard-coded integers.
+Accuracy values don't overlap name-type values, so a misplaced constant such as `bmpm($s, BMPM_APPROX)` is rejected instead of selecting a name type. Use the constant names, not integers.
 
 Invalid `$name_type`, `$accuracy`, or unknown `$language` for the name type raise `ValueError`. Inputs longer than 4096 bytes also raise `ValueError` (security bound shared with `bmpm_match()`).
 
-A forced language also applies to the split variants of prefixed names (`van Smith`, `d'Angelo`). Commons Codec re-detects the language inside its prefix branch, silently ignoring the forced set there; this extension deliberately diverges and keeps it forced.
+A forced language also applies to the split variants of prefixed names (`van Smith`, `d'Angelo`). This differs from Commons Codec, which re-detects the language inside its prefix branch and ignores the forced set there.
 
 ### Daitch-Mokotoff Soundex
 
@@ -102,7 +100,7 @@ dm_soundex("");                            // []  (API: empty list, not ["000000
 
 Empty string is the one encode-level departure from Commons Codec: this API returns `[]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle.
 
-**Indexing caveat:** the same `"000000"` string is also the finished code for pure-vowel inputs that *did* match a rule (e.g. `"A"`). Encode equality of `"000000"` does **not** imply a match: `dm_soundex_match("A", "1")` is `false` while both encode to `["000000"]`. When building an inverted index from `dm_soundex()`, skip the `"000000"` key (or use `dm_soundex_match()` at query time).
+Indexing caveat: `"000000"` is also the finished code for pure-vowel inputs that did match a rule (e.g. `"A"`), so two `"000000"` encodings don't imply a match. `dm_soundex_match("A", "1")` is `false` although both encode to `["000000"]`. When you build an inverted index from `dm_soundex()`, skip the `"000000"` key or use `dm_soundex_match()` at query time.
 
 ### NYSIIS
 
@@ -129,11 +127,11 @@ match_rating("Smith");                     // "SMTH"
 match_rating("Catherine");                 // "CTHRN"
 ```
 
-Use `match_rating_compare()` (below) for the actual homophone decision. It applies the algorithm's length-and-rating rules that plain codex equality skips.
+Use `match_rating_compare()` (below) to decide whether two names match. It applies the algorithm's length and rating rules, which codex equality skips.
 
 ## Comparison helpers
 
-Each encoder produces a different output shape, so "do these sound alike?" needs the right comparison per algorithm. These helpers encapsulate that, so you don't reimplement the set-intersection or match-strength logic in userland.
+Each encoder returns a different output shape, so each needs its own comparison. These helpers implement it, so you don't have to write the set-intersection or match-strength logic in PHP.
 
 ```php
 // Double Metaphone: 2 = primary keys agree, 1 = an alternate crosses, 0 = no match
@@ -162,16 +160,16 @@ match_rating_compare(string $a, string $b): bool
 match_rating_compare("Catherine", "Kathryn");            // true
 ```
 
-**Empty / unencodable never match.** Across all helpers, an empty encoding or an input that produces no usable code is not a homophone of anything (including another empty/unencodable input):
+Empty or unencodable input never matches anything, including another empty or unencodable input:
 
 - empty string, whitespace-only, or cleaned-away punctuation → `false` / `0`, except `match_rating_compare` (next bullet)
 - `dm_soundex_match` also ignores the padded `"000000"` sentinel the encoder emits for non-empty unencodable input; both sides must have actually matched a rule. Pure vowels that encode as `"000000"` *do* match each other (`"A"`/`"E"`), but never match unencodable `"000000"` (`"A"`/`"1"`)
-- `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec — so `match_rating_compare(".,-", ".,-")` is `true` even though cleaning removes everything; non-identical cleaned-empty pairs and trivial single-character inputs still return `false`
+- `match_rating_compare` short-circuits identical raw strings (ASCII case-insensitive) to `true` before cleaning, matching Commons Codec, so `match_rating_compare(".,-", ".,-")` is `true` even though cleaning removes everything; non-identical cleaned-empty pairs and trivial single-character inputs still return `false`
 - `double_metaphone_match` counts a name as unencodable only when *both* its codes are empty. A word-final `W` after a non-initial vowel gives an empty primary with a live alternate (`"-EW"` → `""`/`"F"`), which still crosses at strength `1`, in either argument order
 
 ## Usage
 
-For a one-off "do these sound alike?" check, use the comparison helpers directly. Each applies the correct per-algorithm logic:
+For a one-off check, call a comparison helper:
 
 ```php
 double_metaphone_match("Catherine", "Kathryn");   // 2 (strong)
@@ -209,13 +207,13 @@ $hits = array_keys($hits);
 
 // Splitting a BMPM token string into its individual codes. Prefixed names emit
 // grouped output with parentheses (e.g. bmpm("van Smith") => "(zmit)-(...)"), so
-// split on '(', ')', '|' and '-' -- the same separators bmpm_match() tokenizes on.
+// split on '(', ')', '|' and '-', the same separators bmpm_match() uses.
 $codes = preg_split('/[()|-]+/', bmpm("van Smith"), -1, PREG_SPLIT_NO_EMPTY);
 ```
 
 ## Performance
 
-Single-name encode, warm, `-O2` non-ASan PHP 8.4 on one core, over a representative mix of 18 names (best of 5 trials). Absolute time scales with input length; the relative ordering is the stable part.
+Single-name encode, warm, `-O2` non-ASan PHP 8.4 on one core, over a representative mix of 18 names (best of 5 trials). Absolute time scales with input length; the relative ordering holds.
 
 | encoder | per call | throughput | relative |
 |---|---|---|---|
@@ -225,7 +223,7 @@ Single-name encode, warm, `-O2` non-ASan PHP 8.4 on one core, over a representat
 | `dm_soundex()` | ~0.41 µs | ~2.4M/sec | ~2.3x slower |
 | `bmpm()` | ~11 µs | ~91k/sec | ~60x slower |
 
-Match Rating and NYSIIS are short single-key passes, so they're the cheapest. Double Metaphone is a single linear pass with a primary/alternate split. Daitch-Mokotoff branches on ambiguous letters and dedups the resulting codes; a first-byte rule index keeps it fast. BMPM is the heaviest: language detection, a main transliteration pass, and two final rule passes, expanding a Cartesian product of phoneme alternatives capped at 20 per word. When you know the language, passing an explicit `$language` skips auto-detection and can cut bmpm time several-fold, though the gain depends on the chosen language's ruleset. Choose BMPM for recall, not throughput.
+Match Rating and NYSIIS are short single-key passes. Double Metaphone is one linear pass with a primary/alternate split. Daitch-Mokotoff branches on ambiguous letters and dedups the codes, using a first-byte rule index. BMPM runs language detection, a main transliteration pass, and two final rule passes, expanding a Cartesian product of phoneme alternatives capped at 20 per word. If you know the language, pass `$language` to skip auto-detection; this can cut `bmpm()` time several-fold, depending on the language's ruleset.
 
 The comparison helpers cost roughly two encodes plus a cheap compare:
 
@@ -239,42 +237,41 @@ The comparison helpers cost roughly two encodes plus a cheap compare:
 
 For repeated lookups against a fixed corpus, encode once and index the keys (see [Usage](#usage)) rather than calling a helper per candidate pair.
 
-## Notes & limitations
+## Notes and limitations
 
 - Input is UTF-8. `bmpm()` and `dm_soundex()` fold a Latin accent/ligature set before
-  rule matching. **`bmpm()` also lowercases Cyrillic**, so raw `Иванов` encodes
-  correctly under BMPM. **`dm_soundex()` does not** — its Commons Codec rule table is
-  Latin-oriented; raw Cyrillic typically yields the unencodable sentinel `["000000"]`.
-  Pass romanized forms to DM Soundex.
+  rule matching. `bmpm()` also lowercases Cyrillic, so raw `Иванов` encodes
+  correctly under BMPM. `dm_soundex()` doesn't: its Commons Codec rule table is
+  Latin-oriented, and raw Cyrillic typically yields the unencodable sentinel
+  `["000000"]`. Pass romanized forms to DM Soundex.
 - Empty `$language` auto-detects for BMPM. Pass a lowercase language token (e.g.
-  `"russian"`, `"english"`) to force one language. The token `"any"` is **not** a
-  forced language (it is the default ruleset label); forcing it is rejected with
-  `ValueError` — omit the argument for auto-detect.
-- **Unicode normalization:** BMPM matches on code points and drops unmatched ones.
+  `"russian"`, `"english"`) to force one language. `"any"` is the default ruleset
+  label, not a language; passing it raises `ValueError`. Omit the argument to
+  auto-detect.
+- BMPM matches on code points and drops unmatched ones.
   NFC and NFD forms of the same visual name (e.g. `Café` vs `Cafe` + combining acute)
   can produce different token sets. Prefer NFC (or precomposed Latin) input.
-- **Greek-script input is a known limitation:** Greek capitals are not lowercased
-  (the algorithm's context-sensitive final-sigma cannot be expressed by a point-wise
-  case map), so pass Greek names already lowercased or romanized.
+- Greek capitals are not lowercased (the context-sensitive final sigma can't be
+  expressed as a point-wise case map), so pass Greek names already lowercased or
+  romanized.
 - `double_metaphone()` targets ASCII/Latin; non-letter ASCII bytes are kept then
   skipped in the main loop (so they break multi-letter clusters). Unmapped
   non-ASCII code points outside the fold table are dropped entirely, so a
   non-breaking space or similar separator can join letters that an ASCII hyphen
-  would keep apart — prefer ASCII punctuation for dirty multi-script input.
-- `nysiis()` matches Commons Codec on ASCII surnames; cleaning is deliberately
-  ASCII-only (stricter than Commons `SoundexUtils.clean`, which keeps any
-  Unicode letter). `match_rating()` operates on ASCII letters and folds the
+  would keep apart. Prefer ASCII punctuation for dirty multi-script input.
+- `nysiis()` matches Commons Codec on ASCII surnames; cleaning is ASCII-only
+  (stricter than Commons `SoundexUtils.clean`, which keeps any Unicode letter). `match_rating()` operates on ASCII letters and folds the
   Latin-1/Latin-Extended accent set the reference handles. A non-ASCII letter
-  outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is dropped, a deliberate
-  divergence from Commons Codec, which keeps the raw character in the codex.
+  outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is dropped; Commons Codec
+  keeps the raw character in the codex.
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
-  input longer than 4096 bytes with a `ValueError`. Real names are far shorter;
-  the cap bounds branch work and BMPM's multi-pass expansion on untrusted input.
- - Beyond the length cap, `bmpm()` / `bmpm_match()` also fail hard with a fatal
+  input longer than 4096 bytes with a `ValueError`. The cap bounds branch work and
+  BMPM's multi-pass expansion on untrusted input.
+- Beyond the length cap, `bmpm()` / `bmpm_match()` also fail hard with a fatal
   error (not a catchable `ValueError`) when a crafted input *within* the cap
   would produce output or CPU disproportionate to its size. `dm_soundex()` /
   `dm_soundex_match()` instead keep the first 128 distinct codes on branch-set
-  saturation (no error). Real names never approach these per-encode bounds.
+  saturation (no error). Real names don't approach these bounds.
 
 Input-length policy by function (the cap is per-argument, so both operands of a
 match/compare helper are checked):
@@ -291,8 +288,6 @@ The uncapped encoders run in linear time and space, so bound untrusted input at
 the application layer if you feed them arbitrary-length strings.
 
 ## 🔗 Native PHP extensions
-
-Companion native PHP extensions:
 
 - **[php_excel](https://github.com/iliaal/php_excel)**: native Excel I/O via LibXL. 7-10× faster than PhpSpreadsheet, full XLS/XLSX with formulas, formatting, and styling.
 - **[mdparser](https://github.com/iliaal/mdparser)**: native CommonMark + GFM markdown parser via md4c. 15-30× faster than pure-PHP libraries.
@@ -314,9 +309,8 @@ the Apache License 2.0. The complete terms are in `LICENSE-APACHE`; the Commons
 Codec attribution is in `NOTICE`, and Section 2 of `LICENSE` maps the rule data
 to those files.
 Double Metaphone, NYSIIS, and Match Rating Approach are independent
-implementations of their published algorithms, validated against (and
-edge-case-aligned with) Apache Commons Codec as the parity-test oracle
-(no third-party code or data).
+implementations of their published algorithms, with no third-party code or data.
+Apache Commons Codec is used only as the parity-test oracle.
 
 ---
 

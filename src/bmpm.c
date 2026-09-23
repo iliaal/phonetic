@@ -742,7 +742,7 @@ static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 				int r = ix->order[off + t];
 				const uint32_t *pat = ix->decoded[r].pat;
 				int plen = ix->decoded[r].plen;
-				if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
+				if (plen <= 0) continue;   /* empty pattern: adv=0 would loop forever */
 				if (plen > n - i) continue;
 				if (!bm_seqeq(cp + i, plen, pat, plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
@@ -836,7 +836,7 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 						int r = ix->order[off + t];
 						const uint32_t *pat = ix->decoded[r].pat;
 						int plen = ix->decoded[r].plen;
-						if (plen <= 0) continue;   /* defensive: an empty pattern would match with adv=0 and loop forever; the generator forbids it */
+						if (plen <= 0) continue;   /* empty pattern: adv=0 would loop forever */
 						if (plen > tn - i) continue;
 						if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
 						if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
@@ -1537,7 +1537,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 		for (j = 0; j < nf; j++) if (firsts[j] == c) { seen = 1; break; }
 		if (!seen) firsts[nf++] = c;
 	}
-	for (k = 1; k < nf; k++) {            /* insertion sort */
+	for (k = 1; k < nf; k++) {
 		uint32_t key = firsts[k];
 		int j = k - 1;
 		while (j >= 0 && firsts[j] > key) { firsts[j + 1] = firsts[j]; j--; }

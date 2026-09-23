@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
- - CI: Windows lanes locate the lane-matching `php.exe` instead of assuming
+- CI: Windows lanes locate the lane-matching `php.exe` instead of assuming
   `build/php-bin/php.exe`; release gates reuse the located binary.
 
 
@@ -19,21 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
- - `bmpm_match()`: each operand gets a full per-encode work allowance instead of
+- `bmpm_match()`: each operand gets a full per-encode work allowance instead of
   sharing one budget, so two individually-legal inputs no longer fail together.
- - `dm_soundex()` / `dm_soundex_match()`: branch-set saturation keeps the first
+- `dm_soundex()` / `dm_soundex_match()`: branch-set saturation keeps the first
   128 distinct codes (deterministic) instead of raising `E_ERROR`.
- - Rule data: Daitch-Mokotoff tables moved from `src/bmpm_data.h` to generated
+- Rule data: Daitch-Mokotoff tables moved from `src/bmpm_data.h` to generated
   `src/dm_data.h` (contents identical); the generator validates language rows.
- - Oracle parity matrix grows to 684 rows with a forced-language BMPM mode.
+- Oracle parity matrix grows to 684 rows with a forced-language BMPM mode.
 
 ### Fixed
 
- - CI: warning gate no longer masks `make` failures; Windows job fails closed on
+- CI: warning gate no longer masks `make` failures; Windows job fails closed on
   all-SKIP; `timeout-minutes` everywhere; warnings gated on macOS and Windows.
- - Parity checker: fixture tests for every fail-closed guard; exact oracle pins
+- Parity checker: fixture tests for every fail-closed guard; exact oracle pins
   in budget tests; golden regen-and-diff runs in CI.
- - Docs: MRA identical-raw exception, stub `@throws`/fatal notes, dead `J`
+- Docs: MRA identical-raw exception, stub `@throws`/fatal notes, dead `J`
   advance removed from `double_metaphone()` (no behavior change).
 
 
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()` / `bmpm_match()`: cap each encode's phoneme set, output, text copying,
   and language-guess work, failing hard on crafted super-linear input (CWE-400;
   E_ERROR fatal, not ValueError).
- - `dm_soundex()` / `dm_soundex_match()`: cap the live branch set at 128 distinct
+- `dm_soundex()` / `dm_soundex_match()`: cap the live branch set at 128 distinct
   codes, so fork-alternation input can't fork to ~1700 codes and burn CPU (CWE-400).
 
 ### Changed
@@ -56,13 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING:** `BMPM_APPROX` is now `10` and `BMPM_EXACT` is now `20` (were
-  `1` and `2`). The accuracy values are now disjoint from the name-type values
-  (`BMPM_GENERIC`/`BMPM_ASHKENAZI`/`BMPM_SEPHARDIC` = `0`/`1`/`2`), so a
-  misplaced constant such as `bmpm($name, BMPM_APPROX)` is rejected by argument
-  validation instead of silently running as a name type. Code that uses the
-  constant names is unaffected; only code hard-coding the numeric values `1`/`2`
-  for the `$accuracy` argument needs updating.
+- BREAKING: `BMPM_APPROX` is now `10` and `BMPM_EXACT` is now `20` (were `1`
+  and `2`), so they no longer overlap the name-type values `0`/`1`/`2` and a
+  misplaced `bmpm($name, BMPM_APPROX)` is rejected. Only code passing the
+  integers `1`/`2` as `$accuracy` needs updating.
 - `bmpm()` / `bmpm_match()`: forced `$language = "any"` now raises `ValueError`;
   it is the default ruleset label. Pass an empty string for auto-detect.
 - `double_metaphone()`: stops encoding once both codes reach `max_length`. Same

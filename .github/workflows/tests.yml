@@ -52,8 +52,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends bison libtool-bin
       - name: Download PIE
         run: |
-          # Pin a release tag so CI is not a moving target (latest.phar can
-          # change under our feet). Bump intentionally when upgrading PIE.
+          # Pin a release tag; latest.phar changes without notice. Bump it when
+          # upgrading PIE.
           curl -fsSL -o /tmp/pie.phar \
             https://github.com/php/pie/releases/download/1.4.9/pie.phar
           chmod +x /tmp/pie.phar
@@ -324,8 +324,8 @@ jobs:
           export NO_INTERACTION=1
           /tmp/php-asan/bin/php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
             || { echo "::error::phonetic extension failed to load under ASAN"; exit 1; }
-          # Capture via redirect (not `| tee ... || true`, which masked the exit
-          # status and let an all-skip run pass green under ASAN).
+          # Redirect instead of piping to tee: the pipeline masks the exit status,
+          # so an all-skip ASAN run would pass. The counts below gate the result.
           /tmp/php-asan/bin/php run-tests.php --show-diff --asan -g FAIL,BORK,LEAK,XLEAK tests/ > /tmp/test-output.txt 2>&1 || true
           cat /tmp/test-output.txt
           num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' /tmp/test-output.txt; }

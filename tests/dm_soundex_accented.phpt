@@ -7,7 +7,7 @@ phonetic
 // Müller≡Mueller without a ü=u fold in dmrules (upstream Commons Codec data
 // has ù/ú/û but not ü). Mid-word ü is skipped (no rule) and mid-word "ue"
 // codes empty under default, so both yield the same digit stream. Initial Ü
-// does NOT match U (Über ≠ Uber) — pinned below as a data limitation.
+// does not match U (Über ≠ Uber); pinned below as a data limitation.
 var_dump(dm_soundex("Müller") === dm_soundex("Mueller"));
 var_dump(dm_soundex("Über") === dm_soundex("Uber"));
 // Polish: l-stroke folds to l, e-ogonek branches (default code "|6").

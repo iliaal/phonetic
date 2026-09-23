@@ -50,8 +50,8 @@ tests/**/*.sh
 tests/**/*.php.out
 tests/**/*.php
 
-# NOTE: phonetic_arginfo.h (gen_stub output) and src/bmpm_data.h (codegen
-# output) are generated but DO ship — they are intentionally not ignored.
+# phonetic_arginfo.h, src/bmpm_data.h, and src/dm_data.h are generated but
+# checked in, so they are not ignored.
 
 # editors
 .vscode/

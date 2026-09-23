@@ -1,9 +1,10 @@
 // config.w32 for extension phonetic
 // vim:ft=javascript
 //
-// Windows build counterpart to config.m4. All phonetic rule data (Beider-Morse
-// + Daitch-Mokotoff, vendored from Apache Commons Codec) is compiled in via the
-// generated src/bmpm_data.h, so there is no external library dependency.
+// Windows build counterpart to config.m4. Beider-Morse and Daitch-Mokotoff
+// rule data (vendored from Apache Commons Codec) is compiled in via the
+// generated src/bmpm_data.h and src/dm_data.h, so there is no external library
+// dependency.
 
 ARG_ENABLE("phonetic", "enable phonetic (Double Metaphone, Beider-Morse, Daitch-Mokotoff, NYSIIS, Match Rating) support", "no");
 ARG_ENABLE("phonetic-dev", "phonetic: treat compiler warnings as errors (/WX)", "no");
@@ -17,8 +18,8 @@ if (PHP_PHONETIC != "no") {
 	EXTENSION("phonetic", "phonetic.c");
 	ADD_SOURCES(configure_module_dirname + "/src",
 		"double_metaphone.c bmpm.c dm_soundex.c nysiis.c match_rating.c", "phonetic");
-	// php_phonetic.h / phonetic_arginfo.h live at the module root; bmpm_data.h
-	// lives in src/ next to the engines that include it.
+	// php_phonetic.h / phonetic_arginfo.h live at the module root; the
+	// generated data headers live in src/ next to the engines that include them.
 	ADD_FLAG("CFLAGS_PHONETIC",
 		"/I" + configure_module_dirname + " /I" + configure_module_dirname + "\\src");
 	if (PHP_PHONETIC_DEV != "no") {

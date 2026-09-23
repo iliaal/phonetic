@@ -1,5 +1,5 @@
 --TEST--
-bmpm(): prefix recursion cap (6) boundary — group count stops growing at the cap
+bmpm(): prefix recursion cap (6) boundary: group count stops growing at the cap
 --EXTENSIONS--
 phonetic
 --FILE--

@@ -5,7 +5,7 @@ phonetic
 --FILE--
 <?php
 // Commons Codec imposes no cap on the number of input words. A distinct 65th
-// word must change the output (the engine previously dropped words past 64).
+// word must change the output.
 $w64 = implode(" ", array_map(fn($i) => "word$i", range(1, 64)));
 $w65 = $w64 . " jones";
 $w66 = $w65 . " baker";
