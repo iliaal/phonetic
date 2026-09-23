@@ -194,6 +194,75 @@ jobs:
             echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
           fi
 
+  # setup-php '8.6' resolves to a php-src master snapshot, not the PHP-8.6
+  # branch, so 8.6 is source-built (release mode) from the branch instead.
+  linux-src:
+    name: PHP ${{ matrix.php }} - Linux (PHP-${{ matrix.php }} branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.6']
+
+    env:
+      PHP_VERSION: ${{ matrix.php }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y re2c bison autoconf
+
+      - name: Build PHP from branch
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch="PHP-${PHP_VERSION}" https://github.com/php/php-src.git /tmp/php-src
+          cd /tmp/php-src
+          ./buildconf --force
+          ./configure \
+            --disable-zts \
+            --disable-all \
+            --enable-cli \
+            --prefix=/tmp/php-src-install
+          make -j"$(nproc)"
+          make install
+
+      - name: Build extension
+        run: |
+          # --enable-phonetic-dev sets -Werror, so any warning fails this step.
+          set -euo pipefail
+          export PATH="/tmp/php-src-install/bin:$PATH"
+          phpize
+          ./configure --enable-phonetic --enable-phonetic-dev \
+            --with-php-config=/tmp/php-src-install/bin/php-config
+          make -j"$(nproc)"
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          export PATH="/tmp/php-src-install/bin:$PATH"
+          export TEST_PHP_EXECUTABLE=/tmp/php-src-install/bin/php
+          export TEST_PHP_ARGS="-d extension=$(pwd)/modules/phonetic.so"
+          export NO_INTERACTION=1
+          php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load"; exit 1; }
+          RESULT=$(php run-tests.php --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)
+          echo "$RESULT"
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          echo "passed=$PASSED failed=$FAILED skipped=$SKIPPED borked=$BORKED leaked=$LEAKED"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi
+
   macos:
     name: PHP ${{ matrix.php }} - macOS
     runs-on: macos-latest
@@ -254,7 +323,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.4']
+        php: ['8.4', '8.6']
 
     env:
       ASAN_OPTIONS: exitcode=139:verify_asan_link_order=0:detect_odr_violation=0:detect_leaks=1
