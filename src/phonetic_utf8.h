@@ -124,6 +124,7 @@ static inline uint32_t ph_lc_latin(uint32_t c)
 	if (c >= 0xC0 && c <= 0xD6) return c + 0x20;   /* A-grave .. O-diaeresis */
 	if (c >= 0xD8 && c <= 0xDE) return c + 0x20;   /* O-slash .. Thorn */
 	if (c == 0x0130) return 'i';                    /* I with dot above (Turkish) */
+	if (c == 0x212A) return 'k';                    /* Kelvin sign (Java lowercase) */
 	if (c == 0x1E9E) return 0x00DF;                 /* capital sharp S -> small sharp s (Java lowercase) */
 	if (c >= 0x0100 && c <= 0x0137) return (c & 1u) ? c : c + 1;
 	if (c >= 0x0139 && c <= 0x0148) return (c & 1u) ? c + 1 : c;
