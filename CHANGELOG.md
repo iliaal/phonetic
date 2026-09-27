@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `bmpm()` / `bmpm_match()` / `dm_soundex()` / `dm_soundex_match()`: fold the
+  Unicode KELVIN SIGN (U+212A) to lowercase ASCII `k`, matching Commons Codec.
+
 ## [0.4.3] - 2026-09-04
 
 ### Fixed
