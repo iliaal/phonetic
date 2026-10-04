@@ -32,6 +32,9 @@ on:
 
 permissions: {}
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
+
 concurrency:
   group: release-linux-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
   cancel-in-progress: false
@@ -49,13 +52,13 @@ jobs:
       fail-fast: false
       matrix:
         # ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64),
-        # macos-14 (Apple Silicon arm64). Pinned over `*-latest` to avoid
+        # macos-15 (Apple Silicon arm64). Pinned over `*-latest` to avoid
         # silent runner shifts that would change the toolchain / glibc
         # baseline on published release assets without a repo diff.
         os:
           - ubuntu-24.04
           - ubuntu-24.04-arm
-          - macos-14
+          - macos-15
         php: ['8.4', '8.5']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,7 +137,7 @@ jobs:
         os:
           - ubuntu-24.04
           - ubuntu-24.04-arm
-          - macos-14
+          - macos-15
         php: ['8.4', '8.5']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
