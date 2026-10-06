@@ -260,10 +260,16 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   non-breaking space or similar separator can join letters that an ASCII hyphen
   would keep apart. Prefer ASCII punctuation for dirty multi-script input.
 - `nysiis()` matches Commons Codec on ASCII surnames; cleaning is ASCII-only
-  (stricter than Commons `SoundexUtils.clean`, which keeps any Unicode letter). `match_rating()` operates on ASCII letters and folds the
-  Latin-1/Latin-Extended accent set the reference handles. A non-ASCII letter
-  outside that fold set (e.g. `ẞ` U+1E9E, `İ` U+0130) is dropped; Commons Codec
-  keeps the raw character in the codex.
+  (stricter than Commons `SoundexUtils.clean`, which keeps any Unicode letter).
+- `match_rating()` removes ASCII whitespace and the punctuation `-`, `&`, `'`,
+  `.`, and `,`; other ASCII bytes, including digits and punctuation such as `!`,
+  are retained (`match_rating("12")` returns `"12"`). It uppercases ASCII letters,
+  folds the reference's Latin-1/Latin-Extended accent set, and expands `ß` to
+  `SS` before removing doubled consonants. Any other non-ASCII code point (e.g.
+  `ẞ` U+1E9E, `İ` U+0130, or a non-breaking space) is dropped, so a non-ASCII
+  separator joins the surrounding letters; Commons Codec keeps the raw
+  character in the codex. Filter unwanted characters before encoding if your
+  application needs letter-only keys.
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
   input longer than 4096 bytes with a `ValueError`. The cap bounds branch work and
   BMPM's multi-pass expansion on untrusted input.
