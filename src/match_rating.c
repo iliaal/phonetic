@@ -134,25 +134,18 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 	return out;
 }
 
-/* Delete all vowels, then restore a leading vowel if the word began with one. */
+/* Keep the first character (including a leading vowel), then compact non-vowels. */
 static size_t mra_remove_vowels(char *buf, size_t len)
 {
-	char first;
-	size_t i, n = 0;
+	size_t i, n = 1;
 
 	if (len == 0) {
 		return 0;
 	}
-	first = buf[0];
-	for (i = 0; i < len; i++) {
+	for (i = 1; i < len; i++) {
 		if (!mra_is_vowel(buf[i])) {
 			buf[n++] = buf[i];
 		}
-	}
-	if (mra_is_vowel(first)) {
-		memmove(buf + 1, buf, n);
-		buf[0] = first;
-		n++;
 	}
 	return n;
 }
