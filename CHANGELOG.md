@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- NYSIIS compacts its key in the existing cleaned-input buffer, avoiding a
+  second input-sized temporary allocation without changing encoded keys.
+
 ### Fixed
 
 - `bmpm()` / `bmpm_match()` / `dm_soundex()` / `dm_soundex_match()`: fold the
