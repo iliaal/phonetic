@@ -281,7 +281,7 @@ PHP_FUNCTION(match_rating)
 PHP_FUNCTION(match_rating_compare)
 {
 	zend_string *a, *b;
-	char *na, *nb;
+	char na[6], *nb, *encoded_a;
 	size_t nal, nbl;
 	int diff, sum, min_rating, count;
 
@@ -298,15 +298,17 @@ PHP_FUNCTION(match_rating_compare)
 		RETURN_TRUE;
 	}
 
-	na = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
+	encoded_a = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
+	/* Keep only the bounded codex before allocating the second input buffer. */
+	ZEND_ASSERT(nal <= sizeof(na));
+	memcpy(na, encoded_a, nal);
+	efree(encoded_a);
 	if (nal == 0) {
-		efree(na);
 		RETURN_FALSE;
 	}
 	nb = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
 
 	if (nbl == 0) {
-		efree(na);
 		efree(nb);
 		RETURN_FALSE;
 	}
@@ -316,7 +318,6 @@ PHP_FUNCTION(match_rating_compare)
 		diff = -diff;
 	}
 	if (diff >= 3) {
-		efree(na);
 		efree(nb);
 		RETURN_FALSE;
 	}
@@ -325,7 +326,6 @@ PHP_FUNCTION(match_rating_compare)
 	min_rating = mra_min_rating(sum);
 	count = mra_ltr_rtl(na, nal, nb, nbl);
 
-	efree(na);
 	efree(nb);
 	RETURN_BOOL(count >= min_rating);
 }
