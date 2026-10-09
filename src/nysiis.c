@@ -124,7 +124,10 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 		}
 	}
 
-	key = emalloc(n + 1);
+	/* The key never grows past the current read position. Compact into s:
+	 * writes behind i cannot affect later windows, and a write at i keeps
+	 * the transcoded character needed as the next window's predecessor. */
+	key = s;
 	klen = 0;
 	key[klen++] = s[0];
 
@@ -166,7 +169,6 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 	}
 	ret = klen > 0 ? zend_string_init(key, klen, 0) : ZSTR_EMPTY_ALLOC();
 
-	efree(key);
 	efree(s);
 	return ret;
 }
