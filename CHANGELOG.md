@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `match_rating_compare()` releases the first input-sized encoding buffer before
+  encoding the second name, reducing peak temporary memory for long inputs.
 - Daitch-Mokotoff Soundex stops applying rules once every branch has its final
   six digits, avoiding unnecessary suffix work without changing code order.
 
