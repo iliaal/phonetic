@@ -88,7 +88,7 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 	char *key;
 	zend_string *ret;
 	size_t n, klen, i;
-	size_t stop_length = max_length > 0 ? (size_t) max_length + 3 : (size_t) -1;
+	zend_ulong stop_length = max_length > 0 ? (zend_ulong) max_length + 3 : (zend_ulong) -1;
 
 	s = emalloc(srclen + 1);
 	n = ny_clean(src, srclen, s);
