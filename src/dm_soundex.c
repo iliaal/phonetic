@@ -458,6 +458,17 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 
 		last_char = cp;
 		index += (size_t) best_bytes;
+
+		/* Once every branch has six digits, later replacements cannot change
+		 * any code or its insertion order. Partial branches must keep running. */
+		for (i = 0; i < cur->n; i++) {
+			if (cur->b[i].len < DMS_MAX) {
+				break;
+			}
+		}
+		if (i == cur->n) {
+			break;
+		}
 	}
 
 	for (i = 0; i < cur->n; i++) {
