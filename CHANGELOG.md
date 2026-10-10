@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `match_rating_compare()` releases the first input-sized encoding buffer before
+  encoding the second name, reducing peak temporary memory for long inputs.
 - NYSIIS stops transcoding once the requested key prefix is stable, avoiding
   unnecessary suffix work while preserving final cleanup and unlimited output.
 
