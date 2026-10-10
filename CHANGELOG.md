@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Daitch-Mokotoff Soundex stops applying rules once every branch has its final
+  six digits, avoiding unnecessary suffix work without changing code order.
+
 - NYSIIS compacts its key in the existing cleaned-input buffer, avoiding a
   second input-sized temporary allocation without changing encoded keys.
 
