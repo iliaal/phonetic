@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- NYSIIS stops transcoding once the requested key prefix is stable, avoiding
+  unnecessary suffix work while preserving final cleanup and unlimited output.
+
 - NYSIIS compacts its key in the existing cleaned-input buffer, avoiding a
   second input-sized temporary allocation without changing encoded keys.
 
