@@ -11,19 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Match Rating streams encoding into a six-byte codex, using constant temporary
   memory even for long inputs in `match_rating()` and `match_rating_compare()`.
-
-- `match_rating_compare()` releases the first input-sized encoding buffer before
-  encoding the second name, reducing peak temporary memory for long inputs.
 - Daitch-Mokotoff Soundex stops applying rules once every branch has its final
   six digits, avoiding unnecessary suffix work without changing code order.
 - NYSIIS stops transcoding once the requested key prefix is stable, avoiding
   unnecessary suffix work while preserving final cleanup and unlimited output.
-
 - NYSIIS compacts its key in the existing cleaned-input buffer, avoiding a
   second input-sized temporary allocation without changing encoded keys.
 
 ### Fixed
 
+- The arginfo consistency guard rejects octal, nonliteral, incomplete, or
+  duplicate BMPM accuracy declarations instead of accepting decimal-looking values.
 - `bmpm()` / `bmpm_match()` / `dm_soundex()` / `dm_soundex_match()`: fold the
   Unicode KELVIN SIGN (U+212A) to lowercase ASCII `k`, matching Commons Codec.
 
