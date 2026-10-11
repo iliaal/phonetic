@@ -1,5 +1,5 @@
 --TEST--
-match_rating_compare(): short codex survives releasing the first input buffer
+match_rating_compare(): bounded codices preserve long and asymmetric input behavior
 --EXTENSIONS--
 phonetic
 --FILE--
@@ -13,7 +13,7 @@ $cases = [
     [str_repeat("é", 5000), "E ", true], // One-byte codex from multibyte input.
     [str_repeat("ß", 5000), str_repeat("S", 10000), true],
     [str_repeat("\xDF", 5000), str_repeat("S", 10000), true], // Latin-1 fallback expands.
-    ["BC\0DFG", "BC\0DFG ", true], // Codex copy must retain embedded NUL.
+    ["BC\0DFG", "BC\0DFG ", true], // Bounded codex must retain embedded NUL.
     ["Smith", " smith ", true],
 ];
 foreach ($cases as [$a, $b, $expected]) {

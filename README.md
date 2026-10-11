@@ -290,7 +290,8 @@ match/compare helper are checked):
 | `nysiis`, `nysiis_match` | not capped | encodes (bounded by memory) |
 | `match_rating`, `match_rating_compare` | not capped | encodes (bounded by memory) |
 
-The uncapped encoders run in linear time and space, so bound untrusted input at
+The uncapped encoders run in linear time. Match Rating uses constant temporary
+space; Double Metaphone and NYSIIS use linear space. Bound untrusted input at
 the application layer if you feed them arbitrary-length strings.
 
 ## 🔗 Native PHP extensions
