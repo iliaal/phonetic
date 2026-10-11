@@ -97,12 +97,33 @@ static int mra_trivial(const char *s, size_t len)
 	return 1;
 }
 
-/* Upper-case, strip the reference's punctuation set (- & ' . ,) and whitespace,
- * fold accents. Returns an emalloc'd buffer; *outlen gets its length. */
-static char *mra_clean(const char *src, size_t len, size_t *outlen)
+/* Feed one cleaned character through vowel removal and non-overlapping
+ * consonant-pair removal, retaining only the first three and last three bytes. */
+static void mra_append(char c, char out[6], size_t *n, char *pending)
 {
-	char *out = safe_emalloc(len, 2, 1);
+	if (*n != 0 && mra_is_vowel(c)) {
+		return;
+	}
+	if (*pending != 0 && *pending == c) {
+		*pending = 0;
+		return;
+	}
+	*pending = (c >= 'A' && c <= 'Z' && !mra_is_vowel(c)) ? c : 0;
+	if (*n < 6) {
+		out[(*n)++] = c;
+	} else {
+		out[3] = out[4];
+		out[4] = out[5];
+		out[5] = c;
+	}
+}
+
+/* Full MRA pipeline in constant temporary space. The tail must still be read:
+ * the codex includes its last three characters after cleaning and pair removal. */
+static size_t mra_encode(const char *src, size_t len, char out[6])
+{
 	size_t i = 0, n = 0;
+	char pending = 0;
 
 	while (i < len) {
 		int clen;
@@ -114,69 +135,21 @@ static char *mra_clean(const char *src, size_t len, size_t *outlen)
 			if (c == '-' || c == '&' || c == '\'' || c == '.' || c == ',' || mra_is_space(c)) {
 				continue;
 			}
-			out[n++] = (c >= 'a' && c <= 'z') ? (char) (c - ('a' - 'A')) : (char) c;
+			mra_append((c >= 'a' && c <= 'z') ? (char) (c - ('a' - 'A')) : (char) c,
+				out, &n, &pending);
 		} else if (cp == 0x00DF) {
-			/* Commons Codec uppercases before accent folding; ß expands to SS.
-			 * Other case expansions are unsupported. */
-			out[n++] = 'S';
-			out[n++] = 'S';
+			/* Uppercasing expands both UTF-8 ß and its Latin-1 fallback to SS. */
+			mra_append('S', out, &n, &pending);
+			mra_append('S', out, &n, &pending);
 		} else {
 			char a = mra_deaccent(cp);
 			if (a != 0) {
-				out[n++] = a;
+				mra_append(a, out, &n, &pending);
 			}
-			/* Drop unmapped non-ASCII to keep the codex ASCII-only; Commons Codec retains it. */
-		}
-	}
-
-	out[n] = '\0';
-	*outlen = n;
-	return out;
-}
-
-/* Keep the first character (including a leading vowel), then compact non-vowels. */
-static size_t mra_remove_vowels(char *buf, size_t len)
-{
-	size_t i, n = 1;
-
-	if (len == 0) {
-		return 0;
-	}
-	for (i = 1; i < len; i++) {
-		if (!mra_is_vowel(buf[i])) {
-			buf[n++] = buf[i];
+			/* Drop unmapped non-ASCII; Commons Codec retains it. */
 		}
 	}
 	return n;
-}
-
-/* Match the reference's non-overlapping consonant pairs: BBB becomes BB, not B. */
-static size_t mra_remove_doubles(char *buf, size_t len)
-{
-	size_t i = 0, n = 0;
-
-	while (i < len) {
-		char c = buf[i];
-		buf[n++] = c;
-		if (i + 1 < len && buf[i + 1] == c
-				&& c >= 'A' && c <= 'Z' && !mra_is_vowel(c)) {
-			i += 2;
-		} else {
-			i += 1;
-		}
-	}
-	return n;
-}
-
-static size_t mra_first3last3(char *buf, size_t len)
-{
-	if (len > 6) {
-		buf[3] = buf[len - 3];
-		buf[4] = buf[len - 2];
-		buf[5] = buf[len - 1];
-		return 6;
-	}
-	return len;
 }
 
 static int mra_min_rating(int sum_length)
@@ -186,22 +159,6 @@ static int mra_min_rating(int sum_length)
 	if (sum_length <= 11) return 3;
 	if (sum_length == 12) return 2;
 	return 1;
-}
-
-/* Full MRA pipeline. Returns an emalloc'd buffer (possibly empty). */
-static char *mra_encode(const char *src, size_t len, size_t *outlen)
-{
-	char *buf;
-	size_t n;
-
-	buf = mra_clean(src, len, &n);
-	if (n == 0) { *outlen = 0; return buf; }
-	n = mra_remove_vowels(buf, n);
-	if (n == 0) { *outlen = 0; return buf; }
-	n = mra_remove_doubles(buf, n);
-	n = mra_first3last3(buf, n);
-	*outlen = n;
-	return buf;
 }
 
 static int mra_iequals(const char *a, size_t al, const char *b, size_t bl)
@@ -226,7 +183,7 @@ static int mra_iequals(const char *a, size_t al, const char *b, size_t bl)
  * mirrored positions; return 6 minus the longer remaining length. */
 static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 {
-	/* mra_first3last3 bounds each input to six bytes. */
+	/* mra_encode bounds each input to six bytes. */
 	char ca[8], cb[8];
 	int n1 = (int) na - 1;
 	int n2 = (int) nb - 1;
@@ -262,7 +219,7 @@ static int mra_ltr_rtl(const char *a, size_t na, const char *b, size_t nb)
 PHP_FUNCTION(match_rating)
 {
 	zend_string *input;
-	char *res;
+	char res[6];
 	size_t reslen = 0;
 
 	ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -273,15 +230,14 @@ PHP_FUNCTION(match_rating)
 		RETURN_EMPTY_STRING();
 	}
 
-	res = mra_encode(ZSTR_VAL(input), ZSTR_LEN(input), &reslen);
+	reslen = mra_encode(ZSTR_VAL(input), ZSTR_LEN(input), res);
 	RETVAL_STRINGL(res, reslen);
-	efree(res);
 }
 
 PHP_FUNCTION(match_rating_compare)
 {
 	zend_string *a, *b;
-	char na[6], *nb, *encoded_a;
+	char na[6], nb[6];
 	size_t nal, nbl;
 	int diff, sum, min_rating, count;
 
@@ -298,18 +254,13 @@ PHP_FUNCTION(match_rating_compare)
 		RETURN_TRUE;
 	}
 
-	encoded_a = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), &nal);
-	/* Keep only the bounded codex before allocating the second input buffer. */
-	ZEND_ASSERT(nal <= sizeof(na));
-	memcpy(na, encoded_a, nal);
-	efree(encoded_a);
+	nal = mra_encode(ZSTR_VAL(a), ZSTR_LEN(a), na);
 	if (nal == 0) {
 		RETURN_FALSE;
 	}
-	nb = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), &nbl);
+	nbl = mra_encode(ZSTR_VAL(b), ZSTR_LEN(b), nb);
 
 	if (nbl == 0) {
-		efree(nb);
 		RETURN_FALSE;
 	}
 
@@ -318,7 +269,6 @@ PHP_FUNCTION(match_rating_compare)
 		diff = -diff;
 	}
 	if (diff >= 3) {
-		efree(nb);
 		RETURN_FALSE;
 	}
 
@@ -326,6 +276,5 @@ PHP_FUNCTION(match_rating_compare)
 	min_rating = mra_min_rating(sum);
 	count = mra_ltr_rtl(na, nal, nb, nbl);
 
-	efree(nb);
 	RETURN_BOOL(count >= min_rating);
 }
