@@ -61,7 +61,12 @@ foreach ($modes as $mode => [$arguments, $isSet]) {
         exit(2);
     }
 
-    $lines = preg_split('/\R/', trim($stdout));
+    // Remove only the terminal line separator. Tabs and spaces are TSV data,
+    // and extra blank rows must remain visible to the row-count guard.
+    $lines = preg_split('/\r\n|\n|\r/', $stdout);
+    if (end($lines) === '') {
+        array_pop($lines);
+    }
     if (count($lines) !== count($words)) {
         fwrite(STDERR, "oracle returned the wrong row count for $mode\n");
         exit(2);
