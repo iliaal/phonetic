@@ -30,12 +30,20 @@ if ($c === false) {
     exit(2);
 }
 foreach (['APPROX' => 10, 'EXACT' => 20] as $name => $want) {
-    if (!preg_match('/const\s+BMPM_' . $name . '\s*=\s*(\d+)\s*;/', $stub, $sm)) {
-        fwrite(STDERR, "stub missing BMPM_{$name}\n");
+    // These declarations intentionally use one decimal literal per line.
+    // Do not interpret an octal spelling (010) as decimal ten.
+    $count = preg_match_all('/^[\t ]*const[\t ]+BMPM_' . $name
+        . '\b([^\r\n]*)/m', $stub, $declarations);
+    if ($count !== 1 || !preg_match('/^[\t ]*=[\t ]*(0|[1-9][0-9]*)[\t ]*;[\t ]*$/D', $declarations[1][0], $sm)) {
+        fwrite(STDERR, "stub requires one decimal literal for BMPM_{$name}\n");
         exit(2);
     }
-    if (!preg_match('/#define\s+PH_BMPM_' . $name . '\s+(\d+)/', $c, $cm)) {
-        fwrite(STDERR, "src/bmpm.c missing PH_BMPM_{$name}\n");
+    // Require exactly one complete decimal-literal directive. A prefix match
+    // accepts expressions such as 10 + 1, and \s can cross directive lines.
+    $count = preg_match_all('/^[\t ]*#[\t ]*define[\t ]+PH_BMPM_' . $name
+        . '\b([^\r\n]*)/m', $c, $definitions);
+    if ($count !== 1 || !preg_match('/^[\t ]+(0|[1-9][0-9]*)[\t ]*$/D', $definitions[1][0], $cm)) {
+        fwrite(STDERR, "src/bmpm.c requires one decimal literal for PH_BMPM_{$name}\n");
         exit(2);
     }
     if ((int) $sm[1] !== $want || (int) $cm[1] !== $want || (int) $sm[1] !== (int) $cm[1]) {
