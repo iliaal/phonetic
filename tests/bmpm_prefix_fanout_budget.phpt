@@ -14,10 +14,13 @@ var_dump(is_string(bmpm($payload, BMPM_GENERIC, BMPM_APPROX, "english")));
 // Six separators let each prefix re-fire, allowing 64 leaf encodes.
 // Their aggregate copies exceed the shared budget even though one leaf fits.
 $sep = str_repeat("-", 6);
-bmpm(str_repeat("de" . $sep, 6) . $payload, BMPM_GENERIC, BMPM_APPROX, "english");
+try {
+    bmpm(str_repeat("de" . $sep, 6) . $payload, BMPM_GENERIC, BMPM_APPROX, "english");
+} catch (ValueError $e) {
+    echo $e->getMessage(), "\n";
+}
 ?>
---EXPECTF--
+--EXPECT--
 bool(true)
 bool(true)
-
-Fatal error: bmpm(): phonetic: BMPM encode exceeds work budget in %s on line %d
+phonetic: BMPM encode exceeds work budget

@@ -45,6 +45,7 @@
  * across the entire recursion tree; each bmpm_match operand gets its own budget. */
 #define BMPM_MAX_ENCODE_PHONEMES 2048
 #define BMPM_MAX_ENCODE_BYTES    (4U * 1024U * 1024U)
+#define BMPM_MAX_OUTPUT_RATIO    256U
 
 /* pb_apply recopies accumulated text on each rule hit: O(length^2) work can
  * produce few distinct phonemes. The 32 MiB copy budget also admits the
@@ -61,22 +62,38 @@ typedef struct {
 	size_t bytes;      /* phoneme-text bytes merged so far across this encode */
 	size_t work;       /* phoneme-text bytes copied by pb_apply this encode */
 	size_t guess;      /* language-guess scan units (input len x rule count) */
+	size_t output;     /* serialized leaf text, separators, and prefix punctuation */
+	size_t output_limit;
 } bm_budget;
 
-static zend_always_inline void bm_budget_charge_work(bm_budget *bud, size_t amt)
+static zend_always_inline zend_result bm_budget_charge_work(bm_budget *bud, size_t amt)
 {
 	bud->work += amt;
 	if (bud->work > BMPM_MAX_ENCODE_WORK) {
-		php_error_docref(NULL, E_ERROR, "phonetic: BMPM encode exceeds work budget");
+		zend_value_error("phonetic: BMPM encode exceeds work budget");
+		return FAILURE;
 	}
+	return SUCCESS;
 }
 
-static zend_always_inline void bm_budget_charge_guess(bm_budget *bud, size_t amt)
+static zend_always_inline zend_result bm_budget_charge_guess(bm_budget *bud, size_t amt)
 {
 	bud->guess += amt;
 	if (bud->guess > BMPM_MAX_ENCODE_GUESS) {
-		php_error_docref(NULL, E_ERROR, "phonetic: BMPM encode exceeds language-guess budget");
+		zend_value_error("phonetic: BMPM encode exceeds language-guess budget");
+		return FAILURE;
 	}
+	return SUCCESS;
+}
+
+static zend_result bm_budget_charge_output(bm_budget *bud, size_t amt)
+{
+	if (amt > bud->output_limit - bud->output) {
+		zend_value_error("phonetic: BMPM encode exceeds output size budget");
+		return FAILURE;
+	}
+	bud->output += amt;
+	return SUCCESS;
 }
 
 /* Estimate linear dedupe cost as incoming count x widest text. Hash above
@@ -649,7 +666,7 @@ static int bm_parse_phoneme_expr(const char *raw, int nt, alt_t *alts, int cap)
 }
 
 /* Preserve PhonemeBuilder.apply's iteration order and mid-product cap. */
-static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm_budget *bud)
+static zend_result pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm_budget *bud)
 {
 	pbuilder out;
 	size_t li;
@@ -662,7 +679,10 @@ static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm_budget
 			langset_t ls = ls_restrict(pb->a[li].langs, alts[ai].langs);
 			if (ls == LS_NONE) continue;
 			if ((int) out.n < max) {
-				bm_budget_charge_work(bud, pb->a[li].tn + (size_t) alts[ai].tn);
+				if (bm_budget_charge_work(bud, pb->a[li].tn + (size_t) alts[ai].tn) == FAILURE) {
+					pb_free(&out);
+					return FAILURE;
+				}
 				pb_push(&out, PHON_T(&pb->a[li]), pb->a[li].tn, alts[ai].t, (size_t) alts[ai].tn, ls);
 				if ((int) out.n >= max) { done = 1; break; }
 			}
@@ -670,6 +690,7 @@ static void pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm_budget
 	}
 	pb_free(pb);
 	*pb = out;
+	return SUCCESS;
 }
 
 /* Per-rule pre-decoded pattern (code points + length), pointing into the
@@ -729,11 +750,11 @@ static int rs_dispatch(const ruleset_index *ix, uint32_t c, int *off, int *cnt)
 /* Walk the transliteration rules once across cp[0..n), mutating the builder.
  * Unmatched positions are dropped (no literal append), matching the main pass
  * in PhoneticEngine.encode. */
-static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
+static zend_result bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
                      const uint32_t *cp, int n, int max, bm_budget *bud)
 {
 	int i = 0;
-	if (rs == NULL || rs->rules == NULL) return;
+	if (rs == NULL || rs->rules == NULL) return SUCCESS;
 	while (i < n) {
 		int adv = 1, off = 0, cnt = 0;
 		if (rs_dispatch(ix, cp[i], &off, &cnt)) {
@@ -747,13 +768,16 @@ static void bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_inde
 				if (!bm_seqeq(cp + i, plen, pat, plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
 				if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, cp, i)) continue;
-				pb_apply(pb, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud);
+				if (pb_apply(pb, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud) == FAILURE) {
+					return FAILURE;
+				}
 				adv = plen;
 				break;
 			}
 		}
 		i += adv;
 	}
+	return SUCCESS;
 }
 
 /* Phoneme comparator from Rule.Phoneme.COMPARATOR: char-by-char, shorter wins
@@ -780,14 +804,14 @@ static int bm_phon_qcmp(const void *va, const void *vb)
 /* Apply a final ruleset (common, then language-specific). Re-transcribes each
  * phoneme's text, then collapses duplicates by text while unioning language
  * sets, leaving the result ordered by the phoneme comparator. */
-static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
+static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_index *ix,
                         int max, bm_budget *bud)
 {
 	pbuilder result;
 	size_t pi;
 
 	if (rs == NULL || rs->rules == NULL || rs->count == 0) {
-		return; /* finalRules.isEmpty() -> unchanged */
+		return SUCCESS; /* finalRules.isEmpty() -> unchanged */
 	}
 
 	pb_init(&result);
@@ -841,7 +865,13 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 						if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
 						if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
 						if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
-						pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud);
+						if (pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud) == FAILURE) {
+							if (tcp != stk) efree(tcp);
+							pb_free(&sub);
+							if (hashed) zend_hash_destroy(&seen);
+							pb_free(&result);
+							return FAILURE;
+						}
 						found = 1;
 						adv = plen;
 						break;
@@ -884,8 +914,11 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 					bud->bytes += np->tn;
 					if (bud->phonemes > BMPM_MAX_ENCODE_PHONEMES
 							|| bud->bytes > BMPM_MAX_ENCODE_BYTES) {
-						php_error_docref(NULL, E_ERROR,
-							"phonetic: BMPM encode exceeds phoneme-set budget");
+						zend_value_error("phonetic: BMPM encode exceeds phoneme-set budget");
+						pb_free(&sub);
+						if (hashed) zend_hash_destroy(&seen);
+						pb_free(&result);
+						return FAILURE;
 					}
 					pb_reserve(&result, result.n + 1);
 					/* Transfer ownership so pb_free(&sub) cannot free the moved text. */
@@ -913,12 +946,20 @@ static void bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ruleset_i
 
 	pb_free(pb);
 	*pb = result;
+	return SUCCESS;
 }
 
-static char *pb_makestring(pbuilder *pb, size_t *outlen)
+static char *pb_makestring(pbuilder *pb, size_t *outlen, bm_budget *bud)
 {
 	smart_str s = {0};
 	size_t i;
+	size_t len = pb->n ? pb->n - 1 : 0;
+	for (i = 0; i < pb->n; i++) {
+		len += pb->a[i].tn;
+	}
+	if (bm_budget_charge_output(bud, len) == FAILURE) {
+		return NULL;
+	}
 	for (i = 0; i < pb->n; i++) {
 		if (i) smart_str_appendc(&s, '|');
 		smart_str_appendl(&s, PHON_T(&pb->a[i]), pb->a[i].tn);
@@ -936,12 +977,16 @@ static char *pb_makestring(pbuilder *pb, size_t *outlen)
 	return r;
 }
 
-static char *bm_pair_string(const char *renc, size_t rr, const char *cenc, size_t cr, size_t *outlen)
+static char *bm_pair_string(const char *renc, size_t rr, const char *cenc, size_t cr, size_t *outlen, bm_budget *bud)
 {
 	size_t len;
 	char *out;
 	size_t pos = 0;
 
+	/* Leaves are charged once; recursive pairs add only their punctuation. */
+	if (bm_budget_charge_output(bud, 5) == FAILURE) {
+		return NULL;
+	}
 	if (rr > SIZE_MAX - cr || rr + cr > SIZE_MAX - 5) {
 		php_error_docref(NULL, E_ERROR, "phonetic: BMPM prefix pair exceeds allocation limit");
 	}
@@ -1005,7 +1050,9 @@ static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n, bm_budget
 	uint64_t present[2] = { 0, 0 };   /* which ASCII code points the input contains */
 	size_t r;
 
-	bm_budget_charge_guess(bud, (size_t) n * li->count);
+	if (bm_budget_charge_guess(bud, (size_t) n * li->count) == FAILURE) {
+		return LS_NONE;
+	}
 
 	for (i = 0; i < n; i++) {
 		uint32_t c = cp[i];
@@ -1117,9 +1164,17 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 			cbuf[0] = 'd';
 			memcpy(cbuf + 1, tcp + 2, (size_t) (tn - 2) * sizeof(uint32_t));
 			renc = bm_encode_sub(nt, rt, forced, tcp + 2, tn - 2, &rr, depth + 1, bud);
+			if (renc == NULL) {
+				efree(cbuf);
+				return NULL;
+			}
 			cenc = bm_encode_sub(nt, rt, forced, cbuf, tn - 1, &cr, depth + 1, bud);
 			efree(cbuf);
-			out = bm_pair_string(renc, rr, cenc, cr, outlen);
+			if (cenc == NULL) {
+				efree(renc);
+				return NULL;
+			}
+			out = bm_pair_string(renc, rr, cenc, cr, outlen, bud);
 			efree(renc);
 			efree(cenc);
 			return out;
@@ -1145,9 +1200,17 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 				}
 				memcpy(cbuf + ll, tcp + ll + 1, (size_t) remn * sizeof(uint32_t));
 				renc = bm_encode_sub(nt, rt, forced, tcp + ll + 1, remn, &rr, depth + 1, bud);
+				if (renc == NULL) {
+					efree(cbuf);
+					return NULL;
+				}
 				cenc = bm_encode_sub(nt, rt, forced, cbuf, ll + remn, &cr, depth + 1, bud);
 				efree(cbuf);
-				out = bm_pair_string(renc, rr, cenc, cr, outlen);
+				if (cenc == NULL) {
+					efree(renc);
+					return NULL;
+				}
+				out = bm_pair_string(renc, rr, cenc, cr, outlen, bud);
 				efree(renc);
 				efree(cenc);
 				return out;
@@ -1223,13 +1286,14 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 
 			{
 				pbuilder pb;
-				char *out;
+				char *out = NULL;
 				pb_init(&pb);
 				pb_seed(&pb, ls);
-				bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES, bud);
-				bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES, bud);
-				bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES, bud);
-				out = pb_makestring(&pb, outlen);
+				if (bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES, bud) == SUCCESS
+						&& bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES, bud) == SUCCESS
+						&& bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES, bud) == SUCCESS) {
+					out = pb_makestring(&pb, outlen, bud);
+				}
 				pb_free(&pb);
 				efree(jn);
 				efree(words);
@@ -1244,6 +1308,9 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp, int n, size_t *outlen, int depth, bm_budget *bud)
 {
 	langset_t ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n, bud);
+	if (ls == LS_NONE) {
+		return NULL;
+	}
 	return bm_encode_core(nt, rt, ls, forced, cp, n, outlen, depth, bud);
 }
 
@@ -1255,8 +1322,13 @@ static char *bm_encode_string(int nt, int rt, langset_t forced, const char *inpu
 	langset_t ls;
 	char *out;
 
+	bud->output_limit = len * BMPM_MAX_OUTPUT_RATIO;
 	for (i = 0; i < n; i++) cp[i] = bm_lc_cp(cp[i]);
 	ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n, bud);
+	if (ls == LS_NONE) {
+		efree(cp);
+		return NULL;
+	}
 	for (i = 0; i < n; i++) if (cp[i] == '-') cp[i] = ' ';
 	out = bm_encode_core(nt, rt, ls, forced, cp, n, outlen, 0, bud);
 	efree(cp);
@@ -1356,11 +1428,14 @@ PHP_FUNCTION(bmpm)
 	}
 
 	{
-		bm_budget bud = {0, 0, 0, 0};
+		bm_budget bud = {0};
 		result = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced,
 		                       ZSTR_VAL(input), ZSTR_LEN(input), &result_len, &bud);
 	}
 
+	if (result == NULL) {
+		RETURN_THROWS();
+	}
 	RETVAL_STRINGL(result, result_len);
 	efree(result);
 }
@@ -1468,9 +1543,12 @@ PHP_FUNCTION(bmpm_match)
 	}
 
 	/* Each operand gets a full, independent encode budget. */
-	bm_budget buda = {0, 0, 0, 0}, budb = {0, 0, 0, 0};
+	bm_budget buda = {0}, budb = {0};
 
 	ra = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(a), ZSTR_LEN(a), &ral, &buda);
+	if (ra == NULL) {
+		RETURN_THROWS();
+	}
 	if (ral == 0) {
 		efree(ra);
 		RETURN_FALSE;
@@ -1480,6 +1558,10 @@ PHP_FUNCTION(bmpm_match)
 		RETURN_TRUE;
 	}
 	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, &budb);
+	if (rb == NULL) {
+		efree(ra);
+		RETURN_THROWS();
+	}
 
 	matched = bmpm_tokens_intersect(ra, ral, rb, rbl);
 

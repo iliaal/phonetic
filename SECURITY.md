@@ -55,10 +55,28 @@ In scope:
   are in scope:
   - the 4096-byte input cap on `bmpm()`, `bmpm_match()`, `dm_soundex()`,
     and `dm_soundex_match()`
-  - the BMPM recursion bound
-  - the per-encode budgets on BMPM phoneme sets, output size,
-    phoneme-text copying, and language-guess work
-  - the Daitch-Mokotoff live branch-set cap
+  - the BMPM prefix recursion depth of 6, after which encoding continues
+    without further prefix branching
+  - the BMPM budgets per encoded operand, shared across its prefix recursion:
+    2048 cumulative distinct phonemes added to final-pass sets, 4 MiB of
+    cumulative text added with those phonemes, 32 MiB of phoneme-text copying
+    while expanding rule alternatives, and 4,194,304 cumulative language-guess
+    scan units (code-point count times rule count per guess)
+  - the BMPM serialized-output cap of 256 times the original operand's byte
+    length, counting each leaf's serialized bytes and five punctuation bytes
+    per prefix pair once across the combined prefix tree
+  - the Daitch-Mokotoff cap of 128 live branches with distinct accumulated
+    codes; final duplicate codes are removed
+  - the Daitch-Mokotoff work budget of 32,768 executed branch/replacement
+    expansions per encoded operand; reused transitions do not consume this
+    budget, and match operands have independent budgets when encoded
+
+  BMPM resource-budget overruns throw catchable `ValueError` exceptions without
+  returning partial output. A short input can trigger an exception, including
+  the 14-byte `"de akeaxhaeasz"`. These counters do not impose a wall-clock CPU
+  limit or a total-memory limit. Daitch-Mokotoff saturation retains the first
+  128 branches with distinct accumulated codes without an exception; exceeding
+  its work budget throws catchable `ValueError` without returning partial codes.
 
   Crafted input that drives disproportionate CPU or memory up to or past
   these budgets is also in scope.

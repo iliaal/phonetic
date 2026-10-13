@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-12
+
 ### Changed
 
+- `bmpm()` / `bmpm_match()`: resource-budget overruns now throw catchable
+  `ValueError` exceptions instead of terminating the request with `E_ERROR`.
+  Callers can catch the exception and continue; normal `finally` blocks and
+  object cleanup run. Short inputs can still exceed a budget.
 - Match Rating streams encoding into a six-byte codex, using constant temporary
   memory even for long inputs in `match_rating()` and `match_rating_compare()`.
 - Daitch-Mokotoff Soundex stops applying rules once every branch has its final
   six digits, avoiding unnecessary suffix work without changing code order.
+- Daitch-Mokotoff Soundex reuses unchanged branch transitions for repeated
+  branching rules, avoiding repeated work while preserving code order and
+  the 4096-byte input limit.
+- `dm_soundex()` / `dm_soundex_match()`: capped executed branch/replacement
+  expansions at 32,768 per encoded operand, excluding reused transitions.
+  Inputs that exceed this budget now throw catchable `ValueError` exceptions
+  without returning partial codes. Match operands have independent budgets;
+  in-budget encodings retain their code order and 128-branch cap.
 - NYSIIS stops transcoding once the requested key prefix is stable, avoiding
   unnecessary suffix work while preserving final cleanup and unlimited output.
 - NYSIIS compacts its key in the existing cleaned-input buffer, avoiding a
@@ -20,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bmpm()` / `bmpm_match()`: capped serialized output at 256 times the original
+  input byte length, including separators and prefix punctuation. Each match
+  operand has its own cap. Oversized output raises `ValueError` without returning
+  a partial encoding.
+- Documented the exact BMPM resource counters and corrected the vendored Hebrew
+  helper-file description: no loaded rule set includes those files.
 - The arginfo consistency guard rejects octal, nonliteral, incomplete, or
   duplicate BMPM accuracy declarations instead of accepting decimal-looking values.
 - `bmpm()` / `bmpm_match()` / `dm_soundex()` / `dm_soundex_match()`: fold the
@@ -255,7 +275,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.3...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.4...HEAD
+[0.4.4]: https://github.com/iliaal/phonetic/releases/tag/0.4.4
 [0.4.3]: https://github.com/iliaal/phonetic/releases/tag/0.4.3
 [0.4.2]: https://github.com/iliaal/phonetic/releases/tag/0.4.2
 [0.4.1]: https://github.com/iliaal/phonetic/releases/tag/0.4.1

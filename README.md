@@ -82,13 +82,13 @@ Constants (numeric values):
 
 Accuracy values don't overlap name-type values, so a misplaced constant such as `bmpm($s, BMPM_APPROX)` is rejected instead of selecting a name type. Use the constant names, not integers.
 
-Invalid `$name_type`, `$accuracy`, or unknown `$language` for the name type raise `ValueError`. Inputs longer than 4096 bytes also raise `ValueError` (security bound shared with `bmpm_match()`).
+Invalid `$name_type`, `$accuracy`, or unknown `$language` for the name type raise `ValueError`. Inputs longer than 4096 bytes and resource-budget overruns also raise `ValueError` (bounds shared with `bmpm_match()`; see [Notes and limitations](#notes-and-limitations)).
 
 A forced language also applies to the split variants of prefixed names (`van Smith`, `d'Angelo`). This differs from Commons Codec, which re-detects the language inside its prefix branch and ignores the forced set there.
 
 ### Daitch-Mokotoff Soundex
 
-List of distinct 6-digit codes (the algorithm branches on ambiguous letters). Matches Apache Commons Codec's `DaitchMokotoffSoundex` in branching mode.
+List of distinct 6-digit codes (the algorithm branches on ambiguous letters). Uses Apache Commons Codec's `DaitchMokotoffSoundex` branching rules, with the resource limits described in [Notes and limitations](#notes-and-limitations).
 
 ```php
 dm_soundex(string $string): array
@@ -98,7 +98,7 @@ dm_soundex("Peters");                      // ['734000', '739400']
 dm_soundex("");                            // []  (API: empty list, not ["000000"])
 ```
 
-Empty string is the one encode-level departure from Commons Codec: this API returns `[]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle.
+For an empty string, this API returns `[]` instead of Commons Codec's `["000000"]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle. Inputs over 4096 bytes or encodings that exceed the work budget throw `ValueError`.
 
 Indexing caveat: `"000000"` is also the finished code for pure-vowel inputs that did match a rule (e.g. `"A"`), so two `"000000"` encodings don't imply a match. `dm_soundex_match("A", "1")` is `false` although both encode to `["000000"]`. When you build an inverted index from `dm_soundex()`, skip the `"000000"` key or use `dm_soundex_match()` at query time.
 
@@ -271,13 +271,44 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   character in the codex. Filter unwanted characters before encoding if your
   application needs letter-only keys.
 - `bmpm()`, `bmpm_match()`, `dm_soundex()`, and `dm_soundex_match()` reject
-  input longer than 4096 bytes with a `ValueError`. The cap bounds branch work and
-  BMPM's multi-pass expansion on untrusted input.
-- Beyond the length cap, `bmpm()` / `bmpm_match()` also fail hard with a fatal
-  error (not a catchable `ValueError`) when a crafted input *within* the cap
-  would produce output or CPU disproportionate to its size. `dm_soundex()` /
-  `dm_soundex_match()` instead keep the first 128 distinct codes on branch-set
-  saturation (no error). Real names don't approach these bounds.
+  input longer than 4096 bytes with a `ValueError`.
+- `bmpm()` and `bmpm_match()` throw `ValueError` on a resource-budget overrun.
+  Each encoded operand has the limits below; all recursive prefix variants
+  share that operand's budgets. Prefix splitting stops at recursion depth 6
+  and encodes the remaining input without further branching.
+- `dm_soundex()` and `dm_soundex_match()` keep the first 128 branches with
+  distinct accumulated codes on saturation without an error, then remove
+  duplicate final codes. This can return fewer than 128 codes. Each encoded
+  operand also permits 32,768 executed branch/replacement expansions; reused
+  transitions do not consume this budget. Exceeding the work budget throws
+  `ValueError` without returning partial codes. Match operands have independent
+  budgets when encoded.
+
+BMPM resource limits per encoded operand:
+
+| Resource | Limit |
+|---|---|
+| Distinct phonemes added to final-pass sets, cumulatively | 2048 |
+| Text bytes added with those phonemes, cumulatively | 4 MiB (4,194,304 bytes) |
+| Phoneme-text bytes copied while expanding rule alternatives, cumulatively | 32 MiB (33,554,432 bytes) |
+| Language-guess scan units: code-point count × rule count per guess | 4,194,304 units, cumulatively |
+| Serialized output, including `\|` separators and prefix punctuation | 256 × original input byte length |
+
+The output budget counts the combined prefix tree once, including each leaf's
+serialized bytes and five punctuation bytes per prefix pair. These are specific
+resource counters, not a wall-clock CPU limit or a total-memory limit. Even short
+BMPM inputs can exceed a budget; for example, the 14-byte input below raises
+`ValueError`. Catch budget exceptions when processing untrusted names or batches:
+
+```php
+try {
+    $key = bmpm("de akeaxhaeasz");
+} catch (ValueError $e) {
+    echo "Skipped: ", $e->getMessage(), "\n";
+} finally {
+    echo "Encoding attempt finished\n";
+}
+```
 
 Input-length policy by function (the cap is per-argument, so both operands of a
 match/compare helper are checked):

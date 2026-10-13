@@ -73,6 +73,7 @@ typedef struct {
 /* Bound per-character work by retaining the first 128 distinct branches
  * in insertion order; later branches are discarded deterministically. */
 #define DMS_MAX_BRANCHES 128
+#define DMS_MAX_WORK 32768
 
 typedef struct {
 	dms_branch *b;
@@ -342,14 +343,18 @@ static int dms_is_vowel(char c)
 	return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
 }
 
-/* Return whether any rule matched. An unencodable input still emits 000000
- * for oracle parity, but that sentinel must not count as a match. */
+/* Return whether any rule matched, or -1 after throwing a budget error.
+ * Unencodable input still emits 000000 for oracle parity, but cannot match. */
 static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 {
 	dms_set setA, setB;
 	dms_set *cur = &setA, *next = &setB;
 	dms_branch init;
 	uint32_t last_char = 0;
+	const char *transition[2] = {NULL, NULL};
+	int transition_force[2] = {0, 0};
+	int generation = 0;
+	unsigned work = 0;
 	size_t index = 0;
 	int i, coded = 0;
 
@@ -440,21 +445,53 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 
 		force = (last_char == 'm' && cp == 'n') || (last_char == 'n' && cp == 'm');
 
-		/* Reuse both generations' allocations across input characters. */
-		dms_set_reset(next);
-		for (i = 0; i < cur->n; i++) {
-			int ai;
-			for (ai = 0; ai < nalts; ai++) {
-				dms_branch nb = cur->b[i];
-				dms_process(&nb, alts[ai], force);
-				dms_set_push_dedup(next, &nb);
+		/* A cached transition is valid only while both generations retain
+		 * their codes, insertion order, and replacement-suppression state. */
+		if (transition[generation] != field || transition_force[generation] != force) {
+			int previous_n = next->n;
+			int unchanged = 1;
+
+			dms_set_reset(next);
+			for (i = 0; i < cur->n && next->n < DMS_MAX_BRANCHES; i++) {
+				int ai;
+				for (ai = 0; ai < nalts && next->n < DMS_MAX_BRANCHES; ai++) {
+					dms_branch nb = cur->b[i];
+					if (work >= DMS_MAX_WORK) {
+						zend_value_error("phonetic: DM Soundex encode exceeds work budget");
+						coded = -1;
+						goto done;
+					}
+					work++;
+					dms_process(&nb, alts[ai], force);
+					if (dms_set_find(next, nb.code) >= 0) {
+						continue;
+					}
+					if (unchanged) {
+						if (next->n >= previous_n) {
+							unchanged = 0;
+						} else {
+							const dms_branch *old = &next->b[next->n];
+							unchanged = old->len == nb.len &&
+								old->last_null == nb.last_null &&
+								strcmp(old->code, nb.code) == 0 &&
+								strcmp(old->lastrep, nb.lastrep) == 0;
+						}
+					}
+					dms_set_push(next, &nb);
+				}
 			}
+			if (!unchanged || next->n != previous_n) {
+				transition[generation ^ 1] = NULL;
+			}
+			transition[generation] = field;
+			transition_force[generation] = force;
 		}
 		{
 			dms_set *tmp = cur;
 			cur = next;
 			next = tmp;
 		}
+		generation ^= 1;
 
 		last_char = cp;
 		index += (size_t) best_bytes;
@@ -479,13 +516,14 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		br->code[DMS_MAX] = '\0';
 		dms_set_push_dedup(out, br);
 	}
+done:
 	dms_set_free(&setA);
 	dms_set_free(&setB);
 	return coded;
 }
 
 /* Encode `input` into its Daitch-Mokotoff code set. Returns 1 when the input
- * actually coded (at least one rule matched), 0 otherwise. */
+ * actually coded (at least one rule matched), 0 otherwise, or -1 on error. */
 static int dms_codes(zend_string *input, dms_set *out)
 {
 	smart_str cleaned = {0};
@@ -525,7 +563,10 @@ PHP_FUNCTION(dm_soundex)
 		return;
 	}
 
-	dms_codes(input, &out);
+	if (dms_codes(input, &out) < 0) {
+		dms_set_free(&out);
+		RETURN_THROWS();
+	}
 	array_init_size(return_value, (uint32_t) out.n);
 	for (i = 0; i < out.n; i++) {
 		add_next_index_stringl(return_value, out.b[i].code, DMS_MAX);
@@ -556,6 +597,10 @@ PHP_FUNCTION(dm_soundex_match)
 
 	/* Require a rule match on both sides; padded 000000 alone is not a homophone. */
 	ca = dms_codes(a, &sa);
+	if (ca < 0) {
+		dms_set_free(&sa);
+		RETURN_THROWS();
+	}
 	if (!ca) {
 		dms_set_free(&sa);
 		RETURN_FALSE;
@@ -565,6 +610,11 @@ PHP_FUNCTION(dm_soundex_match)
 		RETURN_TRUE;
 	}
 	cb = dms_codes(b, &sb);
+	if (cb < 0) {
+		dms_set_free(&sa);
+		dms_set_free(&sb);
+		RETURN_THROWS();
+	}
 
 	if (cb) {
 		for (i = 0; i < sa.n; i++) {

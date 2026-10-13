@@ -18,13 +18,16 @@ var_dump(strlen(bmpm($deep_prefix)));
 var_dump(bmpm("Jackson"));
 
 /* Depth alone cannot bound repeated language guesses; this exhausts that budget. */
-bmpm(str_repeat("de ", 1000) . "cohen");
+try {
+    bmpm(str_repeat("de ", 1000) . "cohen");
+} catch (ValueError $e) {
+    echo $e->getMessage(), "\n";
+}
 ?>
---EXPECTF--
+--EXPECT--
 string(32) "()-(()-(()-(()-(()-(()-(|t))))))"
 bool(true)
 bool(true)
 int(13883)
 string(77) "iakson|iaksun|iatskson|iatsksun|iokson|ioksun|iotskson|iotsksun|zakson|zokson"
-
-Fatal error: bmpm(): phonetic: BMPM encode exceeds language-guess budget in %s on line %d
+phonetic: BMPM encode exceeds language-guess budget

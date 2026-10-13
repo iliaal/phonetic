@@ -276,9 +276,9 @@ foreach (NAME_TYPES as $nt) {
 /*
  * Rule sets, keyed (name_type, rule_type, language). This mirrors the reference
  * static initializer exactly: every language in xx_languages.txt for each rule
- * type, plus a "common" set for approx/exact (never for rules). Helper files
- * such as xx_exact_approx_common and xx_hebrew_common are include-only and are
- * spliced where referenced, never loaded as standalone sets.
+ * type, plus a "common" set for approx/exact (never for rules). The
+ * xx_exact_approx_common helpers are spliced where included. The vendored
+ * xx_hebrew_common files are neither included nor loaded as standalone sets.
  */
 $rulesets = [];   /* list of [nt, rt, lang, rules[]] */
 foreach (NAME_TYPES as $nt) {

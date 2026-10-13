@@ -1,5 +1,5 @@
 --TEST--
-bmpm_match(): each operand gets a full per-encode allowance; one pathological operand still fails hard
+bmpm_match(): each operand gets a full per-encode allowance; one pathological operand throws
 --EXTENSIONS--
 phonetic
 --FILE--
@@ -19,12 +19,15 @@ var_dump(bmpm_match($a, $b, BMPM_GENERIC, BMPM_APPROX, "english"));
 
 // One over-budget operand must still fail.
 $sep = str_repeat("-", 6);
-bmpm_match(str_repeat("de" . $sep, 6) . str_repeat("aves", 300), "cohen", BMPM_GENERIC, BMPM_APPROX, "english");
+try {
+    bmpm_match(str_repeat("de" . $sep, 6) . str_repeat("aves", 300), "cohen", BMPM_GENERIC, BMPM_APPROX, "english");
+} catch (ValueError $e) {
+    echo $e->getMessage(), "\n";
+}
 ?>
---EXPECTF--
+--EXPECT--
 bool(false)
 bool(true)
 bool(true)
 bool(false)
-
-Fatal error: bmpm_match(): phonetic: BMPM encode exceeds work budget in %s on line %d
+phonetic: BMPM encode exceeds work budget

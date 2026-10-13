@@ -9,10 +9,13 @@ echo bmpm("de  la cohen"), "\n";
 var_dump(bmpm("de la cohen") === bmpm("de-la-cohen"));
 
 // Three-pass expansion of this 4096-byte payload exceeds the work budget.
-bmpm(str_repeat("aves", 1024), BMPM_ASHKENAZI);
+try {
+    bmpm(str_repeat("aves", 1024), BMPM_ASHKENAZI);
+} catch (ValueError $e) {
+    echo $e->getMessage(), "\n";
+}
 ?>
---EXPECTF--
+--EXPECT--
 (lYkYin|lYkoin|lakYin|lakoin|lokYin|lokoin)-((lYkYin|lYkoin|lakYin|lakoin|lokYin|lokoin)-((kYin|koin)-(dYlYkYin|dYlYkoin|dYlakYin|dYlakoin|dYlokYin|dYlokoin|dilYkYin|dilYkoin|dilakYin|dilakoin|dilokYin|dilokoin)))
 bool(true)
-
-Fatal error: bmpm(): phonetic: BMPM encode exceeds work budget in %s on line %d
+phonetic: BMPM encode exceeds work budget

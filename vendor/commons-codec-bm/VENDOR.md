@@ -39,8 +39,10 @@ compatible with the BSD-3-Clause base of this extension.
   - `<nt>_rules_<lang>.txt`, `<nt>_approx_<lang>.txt`, `<nt>_exact_<lang>.txt`
     — per-language transliteration / approximation / exact rule sets.
   - `<nt>_approx_common.txt`, `<nt>_exact_common.txt` — shared rule sets.
-  - `<nt>_exact_approx_common.txt`, `<nt>_hebrew_common.txt` — helper files
-    spliced into the above via `#include`.
+  - `<nt>_exact_approx_common.txt` — helpers spliced into shared rule sets via
+    `#include`.
+  - `<nt>_hebrew_common.txt` — retained verbatim from upstream, but no loaded
+    rule set includes these files, so the generator does not emit their rules.
   - `lang.txt` — license-header-only placeholder retained from upstream.
 
 The full file list is the directory contents; nothing was added, removed, or
