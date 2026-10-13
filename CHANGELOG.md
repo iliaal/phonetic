@@ -205,8 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the C buffer caps.
 - CI preflights `extension_loaded("phonetic")` and fails on any
   skipped/borked/leaked test, so a silent load failure can't pass green.
-- `scripts/pie-smoke.sh` treats a `pie install` failure as fatal (opt out with
-  `ALLOW_MANUAL_FALLBACK=1`).
+- `scripts/pie-smoke.sh` disables automatic manual-build fallback when the
+  post-install module check fails (opt in with `ALLOW_MANUAL_FALLBACK=1`).
 
 ## [0.2.0] - 2026-06-30
 
