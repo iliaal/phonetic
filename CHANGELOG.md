@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- CI test guards preserve failing runner exit statuses in ASAN and Windows
+  jobs, including the Windows release build, even after a passing test summary.
+
 ## [0.4.4] - 2026-10-12
 
 ### Changed
