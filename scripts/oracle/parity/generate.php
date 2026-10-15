@@ -39,23 +39,33 @@ $modes = [
 $rows = [];
 foreach ($modes as $mode => [$arguments, $isSet]) {
     $command = array_merge(['java', '-cp', $jar, $oracle], $arguments);
-    $pipes = [];
-    $process = proc_open($command, [
-        ['pipe', 'r'],
-        ['pipe', 'w'],
-        ['pipe', 'w'],
-    ], $pipes, $oracleDir);
-    if (!is_resource($process)) {
-        fwrite(STDERR, "could not start oracle for $mode\n");
-        exit(2);
+    // Writing all stdin before draining stdout can deadlock once both pipes
+    // fill. File-backed streams also let the oracle emit stderr at any time.
+    $streams = [tmpfile(), tmpfile(), tmpfile()];
+    try {
+        if (in_array(false, $streams, true)
+            || fwrite($streams[0], $input) !== strlen($input)
+            || !rewind($streams[0])) {
+            fwrite(STDERR, "could not prepare oracle streams for $mode\n");
+            exit(2);
+        }
+        $process = proc_open($command, $streams, $pipes, $oracleDir);
+        if (!is_resource($process)) {
+            fwrite(STDERR, "could not start oracle for $mode\n");
+            exit(2);
+        }
+        $exit = proc_close($process);
+        rewind($streams[1]);
+        rewind($streams[2]);
+        $stdout = stream_get_contents($streams[1]);
+        $stderr = stream_get_contents($streams[2]);
+    } finally {
+        foreach ($streams as $stream) {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
     }
-    fwrite($pipes[0], $input);
-    fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exit = proc_close($process);
     if ($exit !== 0) {
         fwrite(STDERR, "oracle failed for $mode: $stderr\n");
         exit(2);
