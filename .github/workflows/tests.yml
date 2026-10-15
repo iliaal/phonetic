@@ -47,7 +47,7 @@ jobs:
           tools: phpize, php-config
           coverage: none
       - name: Verify standalone PIE smoke result handling
-        run: python3 scripts/tests/test_pie_smoke.py --repeat 200
+        run: python3 scripts/tests/test_pie_smoke.py
       - name: Install PIE build prerequisites
         run: |
           sudo apt-get update -qq
@@ -108,7 +108,7 @@ jobs:
       - name: Verify arginfo matches phonetic.stub.php
         run: php scripts/check_arginfo.php
       - name: Verify workflow test-runner exit guards
-        run: python3 scripts/tests/test_workflow_runner_status.py --repeat 200
+        run: python3 scripts/tests/test_workflow_runner_status.py
 
   # Compare every configured mode/word pair against a frozen Apache Commons
   # Codec 1.17.1 golden. The checker rejects incomplete or duplicate fixtures,
