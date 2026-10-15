@@ -46,6 +46,8 @@ jobs:
           php-version: '8.4'
           tools: phpize, php-config
           coverage: none
+      - name: Verify standalone PIE smoke result handling
+        run: python3 scripts/tests/test_pie_smoke.py --repeat 200
       - name: Install PIE build prerequisites
         run: |
           sudo apt-get update -qq
