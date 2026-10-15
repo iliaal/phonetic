@@ -105,6 +105,8 @@ jobs:
         run: git diff --exit-code src/bmpm_data.h src/dm_data.h
       - name: Verify arginfo matches phonetic.stub.php
         run: php scripts/check_arginfo.php
+      - name: Verify workflow test-runner exit guards
+        run: python3 scripts/tests/test_workflow_runner_status.py --repeat 200
 
   # Compare every configured mode/word pair against a frozen Apache Commons
   # Codec 1.17.1 golden. The checker rejects incomplete or duplicate fixtures,
@@ -393,10 +395,14 @@ jobs:
           export NO_INTERACTION=1
           /tmp/php-asan/bin/php $TEST_PHP_ARGS -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
             || { echo "::error::phonetic extension failed to load under ASAN"; exit 1; }
-          # Redirect instead of piping to tee: the pipeline masks the exit status,
-          # so an all-skip ASAN run would pass. The counts below gate the result.
-          /tmp/php-asan/bin/php run-tests.php --show-diff --asan -g FAIL,BORK,LEAK,XLEAK tests/ > /tmp/test-output.txt 2>&1 || true
+          # Keep diagnostics on failure, but never discard the runner status.
+          # The counts below additionally reject successful all-skip runs.
+          TEST_STATUS=0
+          /tmp/php-asan/bin/php run-tests.php --show-diff --asan -g FAIL,BORK,LEAK,XLEAK tests/ > /tmp/test-output.txt 2>&1 || TEST_STATUS=$?
           cat /tmp/test-output.txt
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::test runner exited with status $TEST_STATUS"; exit "$TEST_STATUS"
+          fi
           num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' /tmp/test-output.txt; }
           PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
           BORKED=$(num borked); LEAKED=$(num leaked)
@@ -494,8 +500,12 @@ jobs:
           export TEST_PHP_EXECUTABLE="$(cygpath -w "$phpbin")"
           export TEST_PHP_ARGS="-n -d extension=$dllwin"
           export NO_INTERACTION=1
-          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || true
+          TEST_STATUS=0
+          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || TEST_STATUS=$?
           echo "$RESULT"
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::test runner exited with status $TEST_STATUS"; exit "$TEST_STATUS"
+          fi
           num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
           PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
           BORKED=$(num borked); LEAKED=$(num leaked)

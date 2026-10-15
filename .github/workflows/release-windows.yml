@@ -141,8 +141,12 @@ jobs:
           export TEST_PHP_EXECUTABLE="$(cygpath -w "$phpbin")"
           export TEST_PHP_ARGS="-n -d extension=$dllwin"
           export NO_INTERACTION=1
-          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || true
+          TEST_STATUS=0
+          RESULT="$("$phpbin" "$runnerwin" --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1)" || TEST_STATUS=$?
           echo "$RESULT"
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::test runner exited with status $TEST_STATUS"; exit "$TEST_STATUS"
+          fi
           num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
           PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
           BORKED=$(num borked); LEAKED=$(num leaked)
