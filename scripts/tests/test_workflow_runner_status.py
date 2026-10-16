@@ -35,7 +35,10 @@ def guards():
             # code too, and dropping it would hide uninitialized-state bugs.
             if start and lines[start - 1] == "TEST_STATUS=0":
                 start -= 1
-            found.append((f"{path.name} guard {index + 1}", "\n".join(lines[start:])))
+            # Require diagnostics in every Tests lane, independent of the
+            # implementation. Release guards retain their existing assertions.
+            found.append((f"{path.name} guard {index + 1}", "\n".join(lines[start:]),
+                          path.name == "tests.yml"))
     assert found, "no workflow result guards found"
     return found
 
@@ -44,17 +47,22 @@ def summary(passed=90, failed=0, skipped=0, borked=0, leaked=0):
     return "".join(f"Tests {key} {value}\n" for key, value in locals().items())
 
 
-def check(label, body, output, status, accepted, directory):
+def check(label, body, output, status, accepted, directory, diagnostics=False, stderr=""):
     # This sole path substitution isolates the ASAN log for concurrent tests;
     # the runner command, status expression, parser, and guard stay unchanged.
     body = body.replace("/tmp/test-output.txt", str(Path(directory) / "output.txt"))
     script = '''set -euo pipefail
-function php() { printf '%s' "$RUNNER_OUTPUT"; return "$RUNNER_STATUS"; }
+function php() {
+    printf '%s' "$RUNNER_OUTPUT"
+    printf '%s' "$RUNNER_STDERR" >&2
+    return "$RUNNER_STATUS"
+}
 function /tmp/php-asan/bin/php() { php; }
 phpbin=php
 runnerwin=run-tests.php
 ''' + body
-    env = dict(os.environ, RUNNER_OUTPUT=output, RUNNER_STATUS=str(status))
+    env = dict(os.environ, RUNNER_OUTPUT=output, RUNNER_STDERR=stderr,
+               RUNNER_STATUS=str(status))
     result = subprocess.run(["bash", "-c", script], env=env,
                             capture_output=True, text=True, timeout=10)
     assert (result.returncode == 0) == accepted, (
@@ -64,6 +72,17 @@ runnerwin=run-tests.php
     if "TEST_STATUS=0" in body and status:
         assert result.returncode == status, f"{label}: runner status not preserved"
         assert output in result.stdout, f"{label}: runner diagnostics lost"
+    if diagnostics:
+        if status:
+            assert result.returncode == status, f"{label}: runner status not preserved"
+        # Command substitution removes terminal newlines; check the captured
+        # content appears once without requiring their original count.
+        for stream, content in (("stdout", output), ("stderr", stderr)):
+            content = content.rstrip("\n")
+            if content:
+                assert result.stdout.count(content) == 1, (
+                    f"{label}: runner {stream} lost or printed more than once"
+                )
 
 
 def main():
@@ -78,12 +97,16 @@ def main():
     cases += [(summary(passed=0), 0, False), ("", 0, False), ("", 7, False)]
     cases += [("\n" + summary() + "\n", 0, True),
               (summary().replace("\n", "\n\n"), 0, True)]
+    # Keep the original fixtures, including truly empty output, unchanged.
+    cases = [(*case, "") for case in cases]
+    cases += [(summary() + "runner stdout diagnostic\n", code, code == 0,
+               "runner stderr diagnostic\n") for code in (0, 1, 7, 139)]
     selected = guards()
     with tempfile.TemporaryDirectory(prefix="phonetic-runner-guard-") as directory:
-        for label, body in selected:
+        for label, body, diagnostics in selected:
             for _ in range(args.repeat):
-                for output, status, accepted in cases:
-                    check(label, body, output, status, accepted, directory)
+                for output, status, accepted, stderr in cases:
+                    check(label, body, output, status, accepted, directory, diagnostics, stderr)
             print(f"{label}: {len(cases)} cases x {args.repeat} passed", flush=True)
     print(f"{len(selected)} workflow guards passed")
 
