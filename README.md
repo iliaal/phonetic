@@ -310,20 +310,25 @@ try {
 }
 ```
 
-Input-length policy by function (the cap is per-argument, so both operands of a
-match/compare helper are checked):
+Input-length policy by function (the 4096-byte caps are checked for both
+operands of a match helper):
 
 | Function(s) | Max input | Over the limit |
 |---|---|---|
 | `bmpm`, `bmpm_match` | 4096 bytes | throws `ValueError` |
 | `dm_soundex`, `dm_soundex_match` | 4096 bytes | throws `ValueError` |
-| `double_metaphone`, `double_metaphone_match` | not capped | encodes (bounded by memory) |
+| `double_metaphone`, `double_metaphone_match` | C `INT_MAX - 11` bytes after folding | throws `ValueError` |
 | `nysiis`, `nysiis_match` | not capped | encodes (bounded by memory) |
 | `match_rating`, `match_rating_compare` | not capped | encodes (bounded by memory) |
 
-The uncapped encoders run in linear time. Match Rating uses constant temporary
-space; Double Metaphone and NYSIIS use linear space. Bound untrusted input at
-the application layer if you feed them arbitrary-length strings.
+Double Metaphone checks the folded-byte limit for each operand it encodes;
+`max_length` separately limits the returned keys. See the
+[folded-input bound](src/double_metaphone.c#L28-L33) and its
+[validation](src/double_metaphone.c#L713-L724).
+
+Double Metaphone, NYSIIS, and Match Rating run in linear time. Match Rating uses
+constant temporary space; Double Metaphone and NYSIIS use linear space. Bound
+untrusted input at the application layer if you feed them arbitrary-length strings.
 
 ## 🔗 Native PHP extensions
 
