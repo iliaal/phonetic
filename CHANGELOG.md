@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bmpm_match()` no longer treats identical prefixed inputs as a match when
+  their encoding contains only empty prefix groups, with no phonetic tokens.
+  Regression coverage: `tests/bmpm_match_empty_prefix.phpt`.
 - CI test guards preserve failing runner exit statuses in ASAN and Windows
   jobs, including the Windows release build, even after a passing test summary.
 

@@ -1554,8 +1554,10 @@ PHP_FUNCTION(bmpm_match)
 		RETURN_FALSE;
 	}
 	if (zend_string_equals(a, b)) {
+		/* Prefix grouping can be nonempty while containing no phonetic tokens. */
+		matched = bmpm_token_count(ra, ral) != 0;
 		efree(ra);
-		RETURN_TRUE;
+		RETURN_BOOL(matched);
 	}
 	rb = bm_encode_string((int) name_type, bm_accuracy_rule_type(accuracy), forced, ZSTR_VAL(b), ZSTR_LEN(b), &rbl, &budb);
 	if (rb == NULL) {
