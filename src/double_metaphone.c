@@ -117,15 +117,16 @@ static void dmet_fold(const char *src, size_t len, smart_str *out)
 	}
 }
 
-/* Core encoder. `folded` is upper-cased ASCII; emits primary and alternate
+/* Core encoder. `buf` is borrowed from the caller and contains folded ASCII
+ * between DMET_PREPAD and DMET_POSTPAD sentinel bytes. Emits primary and alternate
  * codes into the supplied buffers. When max_length > 0, stop once both codes
  * have reached that length (still post-truncate multi-char emissions that
  * overshoot). max_length <= 0 means unlimited (full codes). */
-static void dmet_encode(const char *folded, size_t len, smart_str *primary, smart_str *secondary,
+static void dmet_encode(const char *buf, size_t len, smart_str *primary, smart_str *secondary,
 	zend_long max_length)
 {
 	int total, start, end, pos, slavo;
-	char *buf;
+	const char *folded = buf + DMET_PREPAD;
 	const char *pc, *sc;
 	int adv;
 	size_t cap = (max_length > 0) ? (size_t) max_length : 0;
@@ -140,10 +141,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 	}
 
 	total = DMET_PREPAD + (int) len + DMET_POSTPAD;
-	buf = emalloc((size_t) total + 1);
-	memset(buf, DMET_SENTINEL, (size_t) total);
-	memcpy(buf + DMET_PREPAD, folded, len);
-	buf[total] = '\0';
 
 	start = DMET_PREPAD;
 	end = DMET_PREPAD + (int) len - 1;
@@ -155,7 +152,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 		end--;
 	}
 	if (start > end) {
-		efree(buf);
 		return;
 	}
 
@@ -707,7 +703,6 @@ static void dmet_encode(const char *folded, size_t len, smart_str *primary, smar
 #undef B
 #undef SAT
 
-	efree(buf);
 }
 
 /* Fold + encode one string; max_length <= 0 means full untruncated codes. */
@@ -715,15 +710,20 @@ static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *p
 	zend_long max_length)
 {
 	smart_str folded = {0};
+	size_t folded_len;
 
+	/* Fold directly into the padded buffer consumed by the encoder. */
+	smart_str_appendl(&folded, "--", DMET_PREPAD);
 	dmet_fold(in, len, &folded);
-	if (folded.s != NULL && ZSTR_LEN(folded.s) > (size_t) DMET_MAX_FOLDED_INPUT) {
+	folded_len = ZSTR_LEN(folded.s) - DMET_PREPAD;
+	if (folded_len > (size_t) DMET_MAX_FOLDED_INPUT) {
 		smart_str_free(&folded);
 		zend_argument_value_error(arg_num, "must not exceed %d bytes after folding", DMET_MAX_FOLDED_INPUT);
 		return FAILURE;
 	}
-	if (folded.s != NULL && ZSTR_LEN(folded.s) > 0) {
-		dmet_encode(ZSTR_VAL(folded.s), ZSTR_LEN(folded.s), primary, secondary, max_length);
+	if (folded_len > 0) {
+		smart_str_appendl(&folded, "--------", DMET_POSTPAD);
+		dmet_encode(ZSTR_VAL(folded.s), folded_len, primary, secondary, max_length);
 	}
 	if (primary->s != NULL) {
 		smart_str_0(primary);

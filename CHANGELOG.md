@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Double Metaphone encodes directly from its padded folding buffer instead of
+  allocating a second full-input copy. Both the encoder and match helper retain
+  their existing keys, matching rules, and folded-input limit.
+
 ### Fixed
 
 - `bmpm_match()` no longer treats identical prefixed inputs as a match when
