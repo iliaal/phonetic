@@ -2,12 +2,12 @@
 Double Metaphone reuses the folded input buffer for encoding and matching
 --EXTENSIONS--
 phonetic
---INI--
-memory_limit=16M
 --FILE--
 <?php
+// Allow for platform-specific startup memory while fixing the extra budget.
+ini_set('memory_limit', (string) (memory_get_usage(true) + 10 * 1024 * 1024));
 // Input plus one folded buffer fit; a second full-size copy exceeds the limit.
-$input = str_repeat('BC', 2 * 1024 * 1024);
+$input = str_repeat('BC', 3 * 512 * 1024);
 var_dump(double_metaphone($input));
 var_dump(double_metaphone_match($input, 'BCBC'));
 var_dump(double_metaphone_match('BCBC', $input));
