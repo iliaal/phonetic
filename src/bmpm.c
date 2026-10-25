@@ -115,7 +115,8 @@ typedef uint32_t langset_t;
 #define LS_NONE 0u
 #define LS_ANY  0xFFFFFFFFu
 
-/* Fold Latin and Cyrillic. Greek final sigma requires positional logic,
+/* Lowercase supported Latin and Cyrillic; accent handling stays in the rules.
+ * Greek final sigma requires positional logic,
  * so Greek case folding is unsupported. */
 static uint32_t bm_lc_cp(uint32_t c)
 {

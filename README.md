@@ -223,7 +223,7 @@ Single-name encode, warm, `-O2` non-ASan PHP 8.4 on one core, over a representat
 | `dm_soundex()` | ~0.41 µs | ~2.4M/sec | ~2.3x slower |
 | `bmpm()` | ~11 µs | ~91k/sec | ~60x slower |
 
-Match Rating and NYSIIS are short single-key passes. Double Metaphone is one linear pass with a primary/alternate split. Daitch-Mokotoff branches on ambiguous letters and dedups the codes, using a first-byte rule index. BMPM runs language detection, a main transliteration pass, and two final rule passes, expanding a Cartesian product of phoneme alternatives capped at 20 per word. If you know the language, pass `$language` to skip auto-detection; this can cut `bmpm()` time several-fold, depending on the language's ruleset.
+Match Rating and NYSIIS are short single-key passes. Double Metaphone is one linear pass with a primary/alternate split. Daitch-Mokotoff branches on ambiguous letters and dedups the codes, using a first-byte rule index. BMPM runs language detection, a main transliteration pass, and two final rule passes. Each main pass keeps at most 20 phonemes (ordinary words are concatenated before encoding); each final-pass input phoneme can expand into up to 20 alternatives before the results are merged. The final token set can therefore exceed 20 (`bmpm("Kowalowa")` returns 32), subject to the cumulative [resource budgets](#notes-and-limitations). If you know the language, pass `$language` to skip auto-detection; this can cut `bmpm()` time several-fold, depending on the language's ruleset.
 
 The comparison helpers cost roughly two encodes plus a cheap compare:
 
@@ -239,10 +239,14 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
 
 ## Notes and limitations
 
-- Input is UTF-8. `bmpm()` and `dm_soundex()` fold a Latin accent/ligature set before
-  rule matching. `bmpm()` also lowercases Cyrillic, so raw `Иванов` encodes
-  correctly under BMPM. `dm_soundex()` doesn't: its Commons Codec rule table is
-  Latin-oriented, and raw Cyrillic typically yields the unencodable sentinel
+- Input is UTF-8. `dm_soundex()` folds a Latin accent/ligature set before rule
+  matching. `bmpm()` instead lowercases supported Latin and Cyrillic code points
+  and leaves accent/ligature handling to its language-specific rules; it does not
+  generally strip accents or expand ligatures. For example, with `BMPM_GENERIC`,
+  `BMPM_EXACT`, and `"german"`, `"Müller"` encodes as `"mQler"` while `"Muller"`
+  encodes as `"muler"`. Raw `Иванов` encodes under BMPM's automatic language
+  detection. DM Soundex does not lowercase Cyrillic: its Commons Codec rule table
+  is Latin-oriented, and raw Cyrillic typically yields the unencodable sentinel
   `["000000"]`. Pass romanized forms to DM Soundex.
 - Empty `$language` auto-detects for BMPM. Pass a lowercase language token (e.g.
   `"russian"`, `"english"`) to force one language. `"any"` is the default ruleset
