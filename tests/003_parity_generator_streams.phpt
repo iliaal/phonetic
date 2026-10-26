@@ -39,6 +39,19 @@ while (($line = fgets(STDIN)) !== false) {
 }
 PHP;
 file_put_contents($tmp . '/Oracle.java', $oracle);
+// Derive the expected modes from the production source of truth.
+preg_match_all("/^    '([^']+)' => \\[\\[/m", $source, $matches);
+$modes = $matches[1];
+// One implode instead of repeated appends: with USE_ZEND_ALLOC=0 under ASan,
+// each append reallocates and copies the whole multi-MiB string.
+$rows = [];
+foreach ($modes as $mode) {
+    foreach ($words as $word) {
+        $rows[] = "$mode\t$word\tX\n";
+    }
+}
+$expected = implode('', $rows);
+unset($rows);
 try {
     foreach (['stdout', 'stderr', 'failure'] as $scenario) {
         file_put_contents($tmp . '/scenario', $scenario);
@@ -78,15 +91,6 @@ try {
                 echo "failure: exit status, diagnostics, or original golden lost\n";
             }
         } else {
-            // Derive the expected modes from the production source of truth.
-            preg_match_all("/^    '([^']+)' => \\[\\[/m", $source, $matches);
-            $modes = $matches[1];
-            $expected = '';
-            foreach ($modes as $mode) {
-                foreach ($words as $word) {
-                    $expected .= "$mode\t$word\tX\n";
-                }
-            }
             if ($exit !== 0 || $golden !== $expected || count($modes) < 1) {
                 echo "$scenario: generated rows corrupted (exit $exit)\n";
             }
