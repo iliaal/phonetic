@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-26
+
 ### Performance
 
 - Double Metaphone encodes directly from its padded folding buffer instead of
@@ -289,7 +291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.4...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.5...HEAD
+[0.4.5]: https://github.com/iliaal/phonetic/releases/tag/0.4.5
 [0.4.4]: https://github.com/iliaal/phonetic/releases/tag/0.4.4
 [0.4.3]: https://github.com/iliaal/phonetic/releases/tag/0.4.3
 [0.4.2]: https://github.com/iliaal/phonetic/releases/tag/0.4.2
