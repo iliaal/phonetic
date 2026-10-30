@@ -19,6 +19,18 @@ if ($words === false || $words === []) {
     fwrite(STDERR, "cannot read non-empty word list: $wordsFile\n");
     exit(2);
 }
+$seenWords = [];
+foreach ($words as $word) {
+    if (str_contains($word, "\t")) {
+        fwrite(STDERR, "word list contains a tab: $word\n");
+        exit(2);
+    }
+    if (isset($seenWords[$word])) {
+        fwrite(STDERR, "duplicate word in word list: $word\n");
+        exit(2);
+    }
+    $seenWords[$word] = true;
+}
 $input = implode("\n", $words) . "\n";
 
 $modes = [
