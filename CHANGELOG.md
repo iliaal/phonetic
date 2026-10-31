@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Oracle downloads use an owned temporary file and verify it before replacing
+  the cached jar, avoiding temporary-file collisions and cleaning up download/checksum failures.
+
 ## [0.4.6] - 2026-10-26
 
 ### Fixed

@@ -107,6 +107,8 @@ jobs:
         run: git diff --exit-code src/bmpm_data.h src/dm_data.h
       - name: Verify arginfo matches phonetic.stub.php
         run: php scripts/check_arginfo.php
+      - name: Verify oracle download isolation and cleanup
+        run: python3 scripts/tests/test_fetch_codec.py
       - name: Verify workflow test-runner exit guards
         run: python3 scripts/tests/test_workflow_runner_status.py
 
