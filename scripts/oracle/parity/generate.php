@@ -109,9 +109,16 @@ foreach ($modes as $mode => [$arguments, $isSet]) {
     }
 }
 
-$temporary = $goldenFile . '.tmp';
+$temporary = $goldenFile . '.' . bin2hex(random_bytes(8)) . '.tmp';
 $content = implode("\n", $rows) . "\n";
-if (file_put_contents($temporary, $content) === false || !rename($temporary, $goldenFile)) {
+$stream = fopen($temporary, 'x');
+if ($stream === false) {
+    fwrite(STDERR, "could not create temporary output for $goldenFile\n");
+    exit(2);
+}
+$written = fwrite($stream, $content);
+$closed = fclose($stream);
+if ($written !== strlen($content) || !$closed || !rename($temporary, $goldenFile)) {
     @unlink($temporary);
     fwrite(STDERR, "could not replace $goldenFile\n");
     exit(2);
