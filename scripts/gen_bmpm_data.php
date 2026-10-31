@@ -653,9 +653,16 @@ function write_generated_header(string $path, string $content, string $guard): v
            !== "#endif /* $guard */") {
         fail("generated header is missing its include guard: $path");
     }
-    /* Rename atomically so interruption cannot leave a partial header. */
-    $tmp = $path . '.tmp';
-    if (file_put_contents($tmp, $content) === false) {
+    /* Exclusively own a same-directory temporary file before atomic replacement. */
+    $tmp = $path . '.' . bin2hex(random_bytes(8)) . '.tmp';
+    $stream = fopen($tmp, 'x');
+    if ($stream === false) {
+        fail("could not create temporary output for $path");
+    }
+    $written = fwrite($stream, $content);
+    $closed = fclose($stream);
+    if ($written !== strlen($content) || !$closed) {
+        @unlink($tmp);
         fail("could not write $tmp");
     }
     if (!rename($tmp, $path)) {
