@@ -11,24 +11,28 @@ SHA256="f9f6cb103f2ddc3c99a9d80ada2ae7bf0685111fd6bffccb72033d1da4e6ff23"
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 verify() {
-    printf '%s  %s\n' "$SHA256" "$JAR" | sha256sum -c --status
+    printf '%s  %s\n' "$SHA256" "$1" | sha256sum -c --status
 }
 
-if [[ -f "$JAR" ]] && verify; then
+if [[ -f "$JAR" ]] && verify "$JAR"; then
     echo "$JAR already present, SHA-256 OK"
     exit 0
 fi
 
 echo "Downloading $URL"
-curl -fsSL -o "${JAR}.tmp" "$URL"
-mv "${JAR}.tmp" "$JAR"
+TMP=$(mktemp "${JAR}.tmp.XXXXXX")
+trap 'rm -f -- "$TMP"' EXIT
+# Match curl's usual new-file permissions while respecting the caller's umask.
+chmod =rw "$TMP"
+curl -fsSL -o "$TMP" "$URL"
 
-if ! verify; then
+if ! verify "$TMP"; then
     echo "SHA-256 mismatch for $JAR" >&2
     echo "expected: $SHA256" >&2
-    echo "actual:   $(sha256sum "$JAR" | cut -d' ' -f1)" >&2
-    rm -f "$JAR"
+    echo "actual:   $(sha256sum "$TMP" | cut -d' ' -f1)" >&2
     exit 1
 fi
 
+mv -- "$TMP" "$JAR"
+trap - EXIT
 echo "$JAR downloaded, SHA-256 OK"
