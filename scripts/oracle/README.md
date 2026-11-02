@@ -12,7 +12,7 @@ The jar is fetched, not committed (see `.gitignore` here).
 ```sh
 ./fetch-codec.sh    # downloads the jar from Maven Central, verifies pinned SHA-256
 
-# one input per line on stdin, TSV "input<TAB>output" on stdout
+# UTF-8 input lines on stdin, UTF-8 TSV "input<TAB>output" on stdout
 echo Smith | java -cp commons-codec-1.17.1.jar Oracle.java dm            # primary|alternate
 echo Smith | java -cp commons-codec-1.17.1.jar Oracle.java dm 0          # maxlen 0
 echo Smith | java -cp commons-codec-1.17.1.jar Oracle.java bmpm gen approx
