@@ -29,7 +29,8 @@ class DownloadTests(unittest.TestCase):
         curl.write_text(f"#!{sys.executable}\n" + '''import os, pathlib, sys, time
 target = pathlib.Path(sys.argv[sys.argv.index('-o') + 1])
 mode = os.environ.get('DOWNLOAD_MODE', 'good')
-target.write_bytes(b'valid fixture jar\\n' if mode == 'good' else b'bad')
+# Keep curl's output descriptor open while the competing download publishes.
+stream = target.open('wb')
 if mode == 'wait-bad':
     pathlib.Path(os.environ['READY']).touch()
     deadline = time.monotonic() + 10
@@ -37,6 +38,8 @@ if mode == 'wait-bad':
         if time.monotonic() > deadline:
             sys.exit(99)
         time.sleep(.01)
+stream.write(b'valid fixture jar\\n' if mode == 'good' else b'bad')
+stream.close()
 sys.exit(22 if mode == 'fail' else 0)
 ''')
         curl.chmod(0o755)
