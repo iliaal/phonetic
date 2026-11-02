@@ -40,6 +40,8 @@ if mode == 'wait-bad':
         time.sleep(.01)
 stream.write(b'valid fixture jar\\n' if mode == 'good' else b'bad')
 stream.close()
+if mode == 'wait-bad':
+    pathlib.Path(os.environ['WRITTEN']).touch()
 sys.exit(22 if mode == 'fail' else 0)
 ''')
         curl.chmod(0o755)
@@ -86,9 +88,10 @@ sys.exit(22 if mode == 'fail' else 0)
 
     def test_failed_concurrent_download_preserves_success(self):
         ready, release = self.root / 'ready', self.root / 'release'
+        written = self.root / 'written'
         first = subprocess.Popen(['bash', str(self.script)], stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, env=dict(self.env, DOWNLOAD_MODE='wait-bad',
-                READY=str(ready), RELEASE=str(release)))
+                READY=str(ready), RELEASE=str(release), WRITTEN=str(written)))
         try:
             deadline = time.monotonic() + 10
             while not ready.exists():
@@ -99,6 +102,7 @@ sys.exit(22 if mode == 'fail' else 0)
             release.touch()
             first.communicate(timeout=15)
             self.assertNotEqual(first.returncode, 0)
+            self.assertTrue(written.exists(), 'first download did not complete its late write')
             self.assertEqual((self.root / JAR).read_bytes(), GOOD)
             self.assert_clean()
         finally:
