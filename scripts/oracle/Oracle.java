@@ -1,5 +1,6 @@
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Locale;
@@ -42,6 +43,8 @@ public final class Oracle {
 
         final BufferedReader in =
             new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        // Keep the TSV protocol UTF-8 even when the process locale is ASCII.
+        final PrintWriter stdout = new PrintWriter(System.out, true, StandardCharsets.UTF_8);
         String line;
         while ((line = in.readLine()) != null) {
             String out;
@@ -50,7 +53,7 @@ public final class Oracle {
             } catch (EncoderException | IllegalArgumentException e) {
                 out = "!ERROR:" + e.getMessage();
             }
-            System.out.println(line + "\t" + out);
+            stdout.println(line + "\t" + out);
         }
     }
 

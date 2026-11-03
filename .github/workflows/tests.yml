@@ -135,6 +135,7 @@ jobs:
           # a hand-edited or shrunk corpus cannot pass the check below.
           set -euo pipefail
           scripts/oracle/fetch-codec.sh
+          python3 scripts/tests/test_oracle.py
           php scripts/oracle/parity/generate.php
           git diff --exit-code scripts/oracle/parity/golden.tsv
       - name: Build extension
