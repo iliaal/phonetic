@@ -372,8 +372,6 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		int best_cplen = 0;
 		const char *field;
 		int at_start;
-		char alts[DMS_CAP_CODE_ALTS][DMS_CAP_CODE_LEN + 1];
-		int nalts;
 		int force;
 
 		/* Choose the longest matching pattern within this first-byte bucket. */
@@ -412,37 +410,6 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 			field = dms_is_vowel(nx) ? best->before_vowel : best->default_code;
 		}
 
-		/* The generator enforces both caps; exceeding either means corrupt rule data. */
-		nalts = 0;
-		{
-			const char *p = field;
-			int wl = 0;
-			for (;;) {
-				if (*p == '|' || *p == '\0') {
-					alts[nalts][wl] = '\0';
-					nalts++;
-					if (*p == '\0') {
-						break;
-					}
-					if (nalts >= DMS_CAP_CODE_ALTS) {
-						zend_error_noreturn(E_CORE_ERROR,
-							"phonetic: DM rule code field exceeds %d alternatives",
-							DMS_CAP_CODE_ALTS);
-					}
-					wl = 0;
-					p++;
-				} else {
-					if (wl >= DMS_CAP_CODE_LEN) {
-						zend_error_noreturn(E_CORE_ERROR,
-							"phonetic: DM rule code alternative exceeds %d chars",
-							DMS_CAP_CODE_LEN);
-					}
-					alts[nalts][wl++] = *p;
-					p++;
-				}
-			}
-		}
-
 		force = (last_char == 'm' && cp == 'n') || (last_char == 'n' && cp == 'm');
 
 		/* A cached transition is valid only while both generations retain
@@ -450,6 +417,40 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		if (transition[generation] != field || transition_force[generation] != force) {
 			int previous_n = next->n;
 			int unchanged = 1;
+			char alts[DMS_CAP_CODE_ALTS][DMS_CAP_CODE_LEN + 1];
+			int nalts = 0;
+
+			/* Cached transitions do not consume alternatives: parse only when
+			 * applying replacements to a new generation. The generator enforces
+			 * both caps; exceeding either means corrupt rule data. */
+			{
+				const char *p = field;
+				int wl = 0;
+				for (;;) {
+					if (*p == '|' || *p == '\0') {
+						alts[nalts][wl] = '\0';
+						nalts++;
+						if (*p == '\0') {
+							break;
+						}
+						if (nalts >= DMS_CAP_CODE_ALTS) {
+							zend_error_noreturn(E_CORE_ERROR,
+								"phonetic: DM rule code field exceeds %d alternatives",
+								DMS_CAP_CODE_ALTS);
+						}
+						wl = 0;
+						p++;
+					} else {
+						if (wl >= DMS_CAP_CODE_LEN) {
+							zend_error_noreturn(E_CORE_ERROR,
+								"phonetic: DM rule code alternative exceeds %d chars",
+								DMS_CAP_CODE_LEN);
+						}
+						alts[nalts][wl++] = *p;
+						p++;
+					}
+				}
+			}
 
 			dms_set_reset(next);
 			for (i = 0; i < cur->n && next->n < DMS_MAX_BRANCHES; i++) {
