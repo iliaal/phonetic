@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Remove the unused decoded-pattern length from cached BMPM language-guessing
+  rules. Pattern matching continues to use the parsed atoms and their count.
+
 ## [0.4.6] - 2026-10-26
 
 ### Fixed
