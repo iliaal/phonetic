@@ -32,18 +32,6 @@
 /* Bound per-character branching work on untrusted input. */
 #define DMS_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
-static int dms_u8_cplen(const char *s, size_t len)
-{
-	size_t i;
-	int n = 0;
-	for (i = 0; i < len; i++) {
-		if (((unsigned char) s[i] & 0xc0) != 0x80) {
-			n++;
-		}
-	}
-	return n;
-}
-
 /* Match Java Character.isWhitespace: exclude no-break spaces and U+0085. */
 static int dms_is_ws(uint32_t cp)
 {
@@ -246,9 +234,8 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 }
 
 /* Read-only after MINIT: cached lengths and first-byte buckets avoid
- * rescanning all rules and decoding pattern lengths for each input character. */
+ * rescanning all rules and measuring patterns for each input character. */
 static int *g_dms_plen;        /* [dm_rules_count] strlen(pattern) */
-static int *g_dms_pcplen;      /* [dm_rules_count] code-point length */
 static int *g_dms_order;       /* [dm_rules_count] rule indices grouped by first byte */
 static int  g_dms_off[256];
 static int  g_dms_cnt[256];
@@ -260,7 +247,6 @@ void dms_minit(void)
 	int fillpos[256];
 
 	g_dms_plen   = pemalloc(dm_rules_count * sizeof(int), 1);
-	g_dms_pcplen = pemalloc(dm_rules_count * sizeof(int), 1);
 	g_dms_order  = pemalloc(dm_rules_count * sizeof(int), 1);
 
 	memset(g_dms_cnt, 0, sizeof g_dms_cnt);
@@ -268,7 +254,6 @@ void dms_minit(void)
 		const char *pat = dm_rules[r].pattern;
 		int pb = (int) strlen(pat);
 		g_dms_plen[r]   = pb;
-		g_dms_pcplen[r] = dms_u8_cplen(pat, (size_t) pb);
 		if (pb > 0) {
 			g_dms_cnt[(unsigned char) pat[0]]++;
 		}
@@ -292,7 +277,6 @@ void dms_minit(void)
 void dms_mshutdown(void)
 {
 	if (g_dms_plen)   { pefree(g_dms_plen, 1);   g_dms_plen = NULL; }
-	if (g_dms_pcplen) { pefree(g_dms_pcplen, 1); g_dms_pcplen = NULL; }
 	if (g_dms_order)  { pefree(g_dms_order, 1);  g_dms_order = NULL; }
 }
 
@@ -369,7 +353,6 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		uint32_t cp = ph_u8_next(buf + index, buflen - index, &cplen);
 		const dm_rule *best = NULL;
 		int best_bytes = 0;
-		int best_cplen = 0;
 		const char *field;
 		int at_start;
 		int force;
@@ -387,9 +370,10 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 				if (memcmp(buf + index, dm_rules[rr].pattern, (size_t) pb) != 0) {
 					continue;
 				}
-				if (best == NULL || g_dms_pcplen[rr] > best_cplen) {
+				/* Matching UTF-8 patterns are prefixes of the same input, so
+				 * byte length has the same ordering as code-point length. */
+				if (pb > best_bytes) {
 					best = &dm_rules[rr];
-					best_cplen = g_dms_pcplen[rr];
 					best_bytes = pb;
 				}
 			}
