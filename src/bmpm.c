@@ -1219,89 +1219,49 @@ static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
 		}
 	}
 
-	/* tn+1 entries cover one code point per word plus Java's empty split sentinel;
-	 * there is no separate word cap. */
+	/* Filter and join words as they are scanned. The joined text cannot be
+	 * longer than tcp: filtering only removes text and each separator replaces
+	 * at least one input whitespace code point. */
 	{
-		size_t wcap = (size_t) tn + 1;
-		struct { const uint32_t *p; int l; } *words2 =
-			safe_emalloc(wcap, sizeof(*words2), 0);
-		int nw2 = 0;
-		struct { int s, l; } *words =
-			safe_emalloc(wcap, sizeof(*words), 0);
-		int nw = 0;
+		uint32_t *jn = safe_emalloc((size_t) tn + 1, sizeof(uint32_t), 0);
+		int jl = 0, nw = 0, a = 0;
+		pbuilder pb;
+		char *out = NULL;
 
-		if (tn == 0) {
-			words[nw].s = 0; words[nw].l = 0; nw++;   /* "".split -> [""] */
-		} else {
-			int a = 0;
-			while (a < tn) {
-				int b = a;
-				while (b < tn && !bm_is_ws(tcp[b])) b++;
-				if (b > a) { words[nw].s = a; words[nw].l = b - a; nw++; }
-				a = b;
-				while (a < tn && bm_is_ws(tcp[a])) a++;
-			}
-			if (nw == 0) { words[nw].s = 0; words[nw].l = 0; nw++; }
-		}
-
-		if (nt == BMPM_SEP) {
-			int wi;
-			for (wi = 0; wi < nw; wi++) {
-				const uint32_t *wp = tcp + words[wi].s;
-				int wl = words[wi].l;
-				int last = -1, j;
-				for (j = 0; j < wl; j++) if (wp[j] == 0x27) last = j;
-				const uint32_t *segp = wp + (last + 1);
-				int segl = wl - (last + 1);
-				if (!bm_is_prefix_word(nt, segp, segl)) {
-					words2[nw2].p = segp; words2[nw2].l = segl; nw2++;
+		while (a < tn) {
+			int b = a;
+			while (b < tn && !bm_is_ws(tcp[b])) b++;
+			if (b > a) {
+				const uint32_t *wp = tcp + a;
+				int wl = b - a;
+				if (nt == BMPM_SEP) {
+					int j, last = -1;
+					for (j = 0; j < wl; j++) if (wp[j] == 0x27) last = j;
+					wp += last + 1;
+					wl -= last + 1;
+				}
+				if (nt == BMPM_GEN || !bm_is_prefix_word(nt, wp, wl)) {
+					/* A Sephardic word ending in an apostrophe contributes an
+					 * empty segment, which still needs its joining separator. */
+					if (nw++) jn[jl++] = ' ';
+					memcpy(jn + jl, wp, (size_t) wl * sizeof(uint32_t));
+					jl += wl;
 				}
 			}
-		} else if (nt == BMPM_ASH) {
-			int wi;
-			for (wi = 0; wi < nw; wi++) {
-				const uint32_t *wp = tcp + words[wi].s;
-				int wl = words[wi].l;
-				if (!bm_is_prefix_word(nt, wp, wl)) {
-					words2[nw2].p = wp; words2[nw2].l = wl; nw2++;
-				}
-			}
-		} else {
-			int wi;
-			for (wi = 0; wi < nw; wi++) {
-				words2[nw2].p = tcp + words[wi].s;
-				words2[nw2].l = words[wi].l;
-				nw2++;
-			}
+			a = b;
+			while (a < tn && bm_is_ws(tcp[a])) a++;
 		}
 
-		/* concat = true: join words2 with single spaces */
-		{
-			uint32_t *jn = safe_emalloc((size_t) tn + 64, sizeof(uint32_t), 0);
-			int jl = 0, wi;
-			for (wi = 0; wi < nw2; wi++) {
-				int k;
-				if (wi) jn[jl++] = ' ';
-				for (k = 0; k < words2[wi].l; k++) jn[jl++] = words2[wi].p[k];
-			}
-
-			{
-				pbuilder pb;
-				char *out = NULL;
-				pb_init(&pb);
-				pb_seed(&pb, ls);
-				if (bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES, bud) == SUCCESS
-						&& bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES, bud) == SUCCESS
-						&& bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES, bud) == SUCCESS) {
-					out = pb_makestring(&pb, outlen, bud);
-				}
-				pb_free(&pb);
-				efree(jn);
-				efree(words);
-				efree(words2);
-				return out;
-			}
+		pb_init(&pb);
+		pb_seed(&pb, ls);
+		if (bm_run_main(&pb, rules_main, ix_main, jn, jl, BMPM_MAX_PHONEMES, bud) == SUCCESS
+				&& bm_apply_final(&pb, final1, ix_f1, BMPM_MAX_PHONEMES, bud) == SUCCESS
+				&& bm_apply_final(&pb, final2, ix_f2, BMPM_MAX_PHONEMES, bud) == SUCCESS) {
+			out = pb_makestring(&pb, outlen, bud);
 		}
+		pb_free(&pb);
+		efree(jn);
+		return out;
 	}
 }
 
