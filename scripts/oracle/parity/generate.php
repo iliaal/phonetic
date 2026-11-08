@@ -100,6 +100,10 @@ foreach ($modes as $mode => [$arguments, $isSet]) {
             exit(2);
         }
         $output = $parts[1];
+        if (str_starts_with($output, '!ERROR:')) {
+            fwrite(STDERR, "oracle encoding failed for $mode at row " . ($index + 1) . ": $output\n");
+            exit(2);
+        }
         if ($isSet) {
             $tokens = array_filter(explode('|', $output), static fn($token) => $token !== '');
             sort($tokens);

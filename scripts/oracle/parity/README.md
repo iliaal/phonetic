@@ -36,5 +36,7 @@ php -d extension=modules/phonetic.so scripts/oracle/parity/check.php
 ```
 
 `generate.php` verifies the jar SHA-256 before invoking `Oracle.java`, checks
-the returned word order and row count for each mode, then atomically replaces
-`golden.tsv`. Regenerate only after an intended and understood parity change.
+the returned word order and row count for each mode, and rejects per-input
+`!ERROR:` results before atomically replacing `golden.tsv`. An oracle encoding
+error leaves the existing fixture intact. Regenerate only after an intended
+and understood parity change.
