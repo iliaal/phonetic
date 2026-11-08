@@ -1016,7 +1016,6 @@ static char *bm_pair_string(const char *renc, size_t rr, const char *cenc, size_
  * against the name type's language list. Read-only after MINIT. */
 typedef struct {
 	uint32_t *R;
-	int       Rn;
 	int       as, ae;
 	atom_t   *atoms;
 	int       na;
@@ -1621,7 +1620,6 @@ static void bm_build_lang_index(const bmpm_lang_set *S, int nt, langset_index *l
 		int as, ae, na;
 		lp->R = pemalloc((dn ? (size_t) dn : 1) * sizeof(uint32_t), 1);
 		if (dn) memcpy(lp->R, buf, (size_t) dn * sizeof(uint32_t));
-		lp->Rn = dn;
 		na = bm_parse_regex(lp->R, dn, tmp, BMPM_CAP_GUESS_CPS, &as, &ae);
 		lp->as = as; lp->ae = ae; lp->na = na;
 		lp->atoms = pemalloc((na ? (size_t) na : 1) * sizeof(atom_t), 1);
