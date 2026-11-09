@@ -248,6 +248,17 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   detection. DM Soundex does not lowercase Cyrillic: its Commons Codec rule table
   is Latin-oriented, and raw Cyrillic typically yields the unencodable sentinel
   `["000000"]`. Pass romanized forms to DM Soundex.
+- Malformed UTF-8 in name inputs is not rejected as an encoding error.
+  Double Metaphone, BMPM, DM Soundex, and Match Rating consume each invalid
+  byte as its Latin-1 code point, then apply their usual folding or rule
+  handling; valid UTF-8 sequences that follow are decoded normally. NYSIIS
+  instead keeps only ASCII letters. Comparison helpers use the same policy
+  when encoding operands, with the early returns described above. For example,
+  `double_metaphone("\xE0AB")` returns `AP`/`AP`, because the invalid `E0` byte
+  contributes an accented `a`. Validate UTF-8 or transcode from a known source
+  encoding before calling these functions if you need strict input handling;
+  this fallback does not identify the source encoding. The input-length and
+  resource limits below still apply.
 - Empty `$language` auto-detects for BMPM. Pass a lowercase language token (e.g.
   `"russian"`, `"english"`) to force one language. `"any"` is the default ruleset
   label, not a language; passing it raises `ValueError`. Omit the argument to
