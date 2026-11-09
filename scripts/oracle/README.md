@@ -23,7 +23,8 @@ echo Smith | java -cp commons-codec-1.17.1.jar Oracle.java mra
 ```
 
 Per-line encoder errors are emitted as `input<TAB>!ERROR:<message>` instead of
-aborting the run.
+aborting the run. Extra command-line arguments are rejected with usage text and
+exit status 2 before any input is encoded; options are not silently ignored.
 
 ## Regenerating golden vectors
 
