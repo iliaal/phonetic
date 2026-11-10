@@ -61,6 +61,9 @@ public final class Oracle {
         final String mode = args[0].toLowerCase(Locale.ROOT);
         switch (mode) {
             case "dm": {
+                if (args.length > 2) {
+                    usage();
+                }
                 final DoubleMetaphone dm = new DoubleMetaphone();
                 if (args.length > 1) {
                     dm.setMaxCodeLen(Integer.parseInt(args[1]));
@@ -68,7 +71,7 @@ public final class Oracle {
                 return s -> dm.doubleMetaphone(s, false) + "|" + dm.doubleMetaphone(s, true);
             }
             case "bmpm": {
-                if (args.length < 3) {
+                if (args.length < 3 || args.length > 4) {
                     usage();
                 }
                 final NameType nameType = nameType(args[1]);
@@ -82,11 +85,14 @@ public final class Oracle {
                 return engine::encode;
             }
             case "dmsoundex": {
+                if (args.length > 1) {
+                    usage();
+                }
                 final DaitchMokotoffSoundex dms = new DaitchMokotoffSoundex();
                 return dms::soundex;
             }
             case "nysiis": {
-                if (args.length < 2) {
+                if (args.length != 2) {
                     usage();
                 }
                 final boolean strict;
@@ -102,6 +108,9 @@ public final class Oracle {
                 return nysiis::encode;
             }
             case "mra": {
+                if (args.length > 1) {
+                    usage();
+                }
                 final MatchRatingApproachEncoder mra = new MatchRatingApproachEncoder();
                 return mra::encode;
             }
