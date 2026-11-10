@@ -84,16 +84,20 @@ static int ny_transcode(char prev, char curr, char next, char aNext, char *dst)
 
 static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_length)
 {
+	char local[128];
 	char *s;
 	char *key;
 	zend_string *ret;
 	size_t n, klen, i;
 	zend_ulong stop_length = max_length > 0 ? (zend_ulong) max_length + 3 : (zend_ulong) -1;
 
-	s = emalloc(srclen + 1);
+	/* Most names fit on the stack; keep the heap fallback for long input. */
+	s = srclen < sizeof(local) ? local : emalloc(srclen + 1);
 	n = ny_clean(src, srclen, s);
 	if (n == 0) {
-		efree(s);
+		if (s != local) {
+			efree(s);
+		}
 		return ZSTR_EMPTY_ALLOC();
 	}
 
@@ -176,7 +180,9 @@ static zend_string *ny_encode(const char *src, size_t srclen, zend_long max_leng
 	}
 	ret = klen > 0 ? zend_string_init(key, klen, 0) : ZSTR_EMPTY_ALLOC();
 
-	efree(s);
+	if (s != local) {
+		efree(s);
+	}
 	return ret;
 }
 

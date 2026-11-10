@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- NYSIIS uses stack scratch space for inputs shorter than 128 bytes, avoiding
+  a temporary heap allocation in both `nysiis()` and `nysiis_match()`. Longer
+  inputs keep the heap-backed path; encoded keys and length limits are unchanged.
+
 ## [0.4.6] - 2026-10-26
 
 ### Fixed
