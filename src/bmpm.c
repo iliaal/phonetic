@@ -1432,6 +1432,7 @@ static zend_bool bmpm_tokens_intersect(const char *a, size_t al, const char *b, 
 	const char *indexed = a, *probed = b;
 	size_t indexed_len = al, probed_len = bl;
 	size_t i = 0;
+	uint32_t count;
 	HashTable tokens;
 	zend_bool matched = 0;
 
@@ -1445,7 +1446,35 @@ static zend_bool bmpm_tokens_intersect(const char *a, size_t al, const char *b, 
 		probed_len = al;
 	}
 
-	zend_hash_init(&tokens, bmpm_token_count(indexed, indexed_len), NULL, NULL, 0);
+	count = bmpm_token_count(indexed, indexed_len);
+	if (count == 0) {
+		return 0;
+	}
+	if (count == 1) {
+		size_t start = 0, end;
+		/* A single token needs no hash table, including grouped output such
+		 * as ()-(t). Compare whole tokens, not substrings or prefix syntax. */
+		while (start < indexed_len && bmpm_tok_sep(indexed[start])) {
+			start++;
+		}
+		end = start;
+		while (end < indexed_len && !bmpm_tok_sep(indexed[end])) {
+			end++;
+		}
+		while (i < probed_len) {
+			size_t j = i;
+			while (j < probed_len && !bmpm_tok_sep(probed[j])) {
+				j++;
+			}
+			if (j - i == end - start && memcmp(indexed + start, probed + i, j - i) == 0) {
+				return 1;
+			}
+			i = j + 1;
+		}
+		return 0;
+	}
+
+	zend_hash_init(&tokens, count, NULL, NULL, 0);
 	while (i < indexed_len) {
 		size_t j = i;
 		while (j < indexed_len && !bmpm_tok_sep(indexed[j])) {

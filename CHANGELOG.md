@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NYSIIS uses stack scratch space for inputs shorter than 128 bytes, avoiding
   a temporary heap allocation in both `nysiis()` and `nysiis_match()`. Longer
   inputs keep the heap-backed path; encoded keys and length limits are unchanged.
+- `bmpm_match()` compares a single indexed phonetic token directly instead of
+  building a hash table, avoiding temporary table and token-key allocations.
+  Grouped output and exact token boundaries retain the same matching behavior.
 
 ## [0.4.6] - 2026-10-26
 
