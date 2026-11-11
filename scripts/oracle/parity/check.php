@@ -133,17 +133,21 @@ foreach ($lines as $lineNumber => $line) {
     }
 }
 
-$missing = [];
+$missingCount = 0;
+$missingSample = [];
 foreach (PARITY_MODES as $mode) {
     foreach ($words as $word => $_) {
         if (!isset($seen[$mode . "\0" . $word])) {
-            $missing[] = "[$mode] $word";
+            $missingCount++;
+            if (count($missingSample) < 3) {
+                $missingSample[] = "[$mode] $word";
+            }
         }
     }
 }
-if ($missing !== []) {
-    $sample = implode(', ', array_slice($missing, 0, 3));
-    fwrite(STDERR, sprintf("incomplete golden: %d missing pair(s); first: %s\n", count($missing), $sample));
+if ($missingCount > 0) {
+    $sample = implode(', ', $missingSample);
+    fwrite(STDERR, sprintf("incomplete golden: %d missing pair(s); first: %s\n", $missingCount, $sample));
     exit(2);
 }
 

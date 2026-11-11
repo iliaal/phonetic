@@ -2,7 +2,7 @@
 /* Both CI lanes put extension= last in TEST_PHP_ARGS; reuse its .so/.dll path.
  * Return [exit code, stdout, stderr]. */
 
-function parity_check_run(string $golden, string $words): array
+function parity_check_run(string $golden, string $words, array $phpArgs = []): array
 {
     $root = dirname(__DIR__);
     $extension = 'extension=' . $root . '/modules/phonetic.so';
@@ -14,7 +14,7 @@ function parity_check_run(string $golden, string $words): array
 
     $pipes = [];
     $process = proc_open(
-        [PHP_BINARY, '-n', '-d', $extension, $root . '/scripts/oracle/parity/check.php', $golden, $words],
+        [PHP_BINARY, '-n', '-d', $extension, ...$phpArgs, $root . '/scripts/oracle/parity/check.php', $golden, $words],
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
         $root,
