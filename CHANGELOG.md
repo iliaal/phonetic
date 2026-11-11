@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- `bmpm_match()` compares a single indexed phonetic token directly instead of
+  building a hash table, avoiding temporary table and token-key allocations.
+  Grouped output and exact token boundaries retain the same matching behavior.
+
 ## [0.4.6] - 2026-10-26
 
 ### Fixed
