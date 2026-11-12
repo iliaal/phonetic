@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- Daitch-Mokotoff Soundex orders each first-byte rule bucket longest-first at
+  startup, allowing encoding to stop at the first matching pattern. Encoded
+  codes, branch order, matching behavior, and resource limits are unchanged.
 - NYSIIS uses stack scratch space for inputs shorter than 128 bytes, avoiding
   a temporary heap allocation in both `nysiis()` and `nysiis_match()`. Longer
   inputs keep the heap-backed path; encoded keys and length limits are unchanged.

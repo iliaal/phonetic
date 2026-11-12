@@ -272,6 +272,19 @@ void dms_minit(void)
 			g_dms_order[fillpos[fb]++] = (int) r;
 		}
 	}
+	/* Stable longest-first buckets let encoding stop at the first match.
+	 * Equal-length rules keep their source order, as in the full scan. */
+	for (b = 0; b < 256; b++) {
+		int start = g_dms_off[b], end = start + g_dms_cnt[b];
+		for (pos = start + 1; pos < end; pos++) {
+			int rr = g_dms_order[pos], j = pos;
+			while (j > start && g_dms_plen[g_dms_order[j - 1]] < g_dms_plen[rr]) {
+				g_dms_order[j] = g_dms_order[j - 1];
+				j--;
+			}
+			g_dms_order[j] = rr;
+		}
+	}
 }
 
 void dms_mshutdown(void)
@@ -371,11 +384,11 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 					continue;
 				}
 				/* Matching UTF-8 patterns are prefixes of the same input, so
-				 * byte length has the same ordering as code-point length. */
-				if (pb > best_bytes) {
-					best = &dm_rules[rr];
-					best_bytes = pb;
-				}
+				 * byte length has the same ordering as code-point length.
+				 * The bucket is longest-first, with ties in source order. */
+				best = &dm_rules[rr];
+				best_bytes = pb;
+				break;
 			}
 		}
 
