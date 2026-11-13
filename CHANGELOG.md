@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- BMPM language guessing skips rules whose required non-ASCII letters are
+  absent from the input, as it already did for ASCII letters. `bmpm()` runs
+  15-25% faster on Latin-script surnames and 40-55% faster on accented and
+  Cyrillic names; encoded output is unchanged.
 - Daitch-Mokotoff Soundex orders each first-byte rule bucket longest-first at
   startup, allowing encoding to stop at the first matching pattern. Encoded
   codes, branch order, matching behavior, and resource limits are unchanged.

@@ -1041,13 +1041,20 @@ static int bm_find_lang_slot(int nt)
 	return 0;
 }
 
+/* Presence-set bit for a code point: exact for ASCII, hashed into the upper
+ * 128 bits otherwise, so a clear bit proves the code point is absent. */
+static zend_always_inline unsigned bm_cp_bit(uint32_t c)
+{
+	return c < 128 ? c : 128 + ((c * 0x9E3779B1u) >> 25);
+}
+
 /* Requires already-lowercased code points. */
 static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n, bm_budget *bud)
 {
 	int i;
 	const langset_index *li = &g_lang_index[bm_find_lang_slot(nt)];
 	langset_t mask = ls_full(nt);
-	uint64_t present[2] = { 0, 0 };   /* which ASCII code points the input contains */
+	uint64_t present[4] = { 0, 0, 0, 0 };   /* code points the input contains (see bm_cp_bit) */
 	size_t r;
 
 	if (bm_budget_charge_guess(bud, (size_t) n * li->count) == FAILURE) {
@@ -1055,16 +1062,16 @@ static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n, bm_budget
 	}
 
 	for (i = 0; i < n; i++) {
-		uint32_t c = cp[i];
-		if (c < 128) present[c >> 6] |= (uint64_t) 1 << (c & 63);
+		unsigned bit = bm_cp_bit(cp[i]);
+		present[bit >> 6] |= (uint64_t) 1 << (bit & 63);
 	}
 
 	for (r = 0; r < li->count; r++) {
 		const lang_parsed *lp = &li->rules[r];
 		int q, skip = 0;
 		for (q = 0; q < lp->req_n; q++) {
-			uint32_t L = lp->req_lit[q];
-			if (L < 128 && !(present[L >> 6] & ((uint64_t) 1 << (L & 63)))) { skip = 1; break; }
+			unsigned bit = bm_cp_bit(lp->req_lit[q]);
+			if (!(present[bit >> 6] & ((uint64_t) 1 << (bit & 63)))) { skip = 1; break; }
 		}
 		if (skip) continue;
 		if (bm_atoms_find(lp->as, lp->ae, lp->atoms, lp->na, cp, n)) {
