@@ -48,7 +48,7 @@ static int dms_is_ws(uint32_t cp)
 }
 
 typedef struct {
-	char code[DMS_MAX + 1];   /* accumulated digits, NUL-terminated */
+	char code[8];             /* accumulated digits, NUL-terminated, zero-padded */
 	int  len;
 	char lastrep[4];          /* last replacement applied (<= 3 chars) */
 	int  last_null;           /* 1 while no replacement has been applied yet */
@@ -95,14 +95,24 @@ static void dms_set_free(dms_set *s)
 	s->hmask = 0;
 }
 
+/* Codes compare as one zero-padded word: bytes past the NUL stay zero
+ * because branches start zeroed, codes only grow, and nothing writes past
+ * the NUL at index DMS_MAX, so code[7] is always 0. */
+typedef char dms_code_is_one_word[sizeof(((dms_branch *) 0)->code) == sizeof(uint64_t) ? 1 : -1];
+
+static zend_always_inline uint64_t dms_code_word(const char *s)
+{
+	uint64_t w;
+	memcpy(&w, s, sizeof w);
+	return w;
+}
+
 static zend_always_inline unsigned dms_code_hash(const char *s)
 {
-	unsigned h = 2166136261u;        /* FNV-1a over the short digit string */
-	while (*s) {
-		h ^= (unsigned char) *s++;
-		h *= 16777619u;
-	}
-	return h;
+	uint64_t w = dms_code_word(s);
+
+	w = (w ^ (w >> 32)) * 0x9E3779B97F4A7C15ull;   /* fold so every digit reaches the slot bits */
+	return (unsigned) (w >> 32);
 }
 
 /* (Re)build the index over the current b[0..n-1], sized to keep load <= 0.5. */
@@ -163,7 +173,7 @@ static int dms_set_find(const dms_set *s, const char *code)
 		unsigned slot = dms_code_hash(code) & (unsigned) s->hmask;
 		int idx;
 		while ((idx = s->hash[slot]) != 0) {
-			if (strcmp(s->b[idx - 1].code, code) == 0) {
+			if (dms_code_word(s->b[idx - 1].code) == dms_code_word(code)) {
 				return idx - 1;
 			}
 			slot = (slot + 1) & (unsigned) s->hmask;
@@ -171,7 +181,7 @@ static int dms_set_find(const dms_set *s, const char *code)
 		return -1;
 	}
 	for (i = 0; i < s->n; i++) {
-		if (strcmp(s->b[i].code, code) == 0) {
+		if (dms_code_word(s->b[i].code) == dms_code_word(code)) {
 			return i;
 		}
 	}
@@ -380,8 +390,16 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 				if ((size_t) index + (size_t) pb > buflen) {
 					continue;
 				}
-				if (memcmp(buf + index, dm_rules[rr].pattern, (size_t) pb) != 0) {
-					continue;
+				{
+					/* The bucket already matched byte 0. */
+					const char *pat = dm_rules[rr].pattern;
+					int k = 1;
+					while (k < pb && buf[index + k] == pat[k]) {
+						k++;
+					}
+					if (k < pb) {
+						continue;
+					}
 				}
 				/* Matching UTF-8 patterns are prefixes of the same input, so
 				 * byte length has the same ordering as code-point length.
@@ -471,7 +489,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 							const dms_branch *old = &next->b[next->n];
 							unchanged = old->len == nb.len &&
 								old->last_null == nb.last_null &&
-								strcmp(old->code, nb.code) == 0 &&
+								dms_code_word(old->code) == dms_code_word(nb.code) &&
 								strcmp(old->lastrep, nb.lastrep) == 0;
 						}
 					}
