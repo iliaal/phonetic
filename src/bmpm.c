@@ -265,18 +265,6 @@ static int bm_suffixeq(const uint32_t *seg, int sn, const uint32_t *p, int pn)
 	return 1;
 }
 
-static int bm_substr_find(const uint32_t *seg, int sn, const uint32_t *p, int pn)
-{
-	int s;
-	if (pn == 0) return 1;
-	for (s = 0; s + pn <= sn; s++) {
-		int k, ok = 1;
-		for (k = 0; k < pn; k++) if (seg[s + k] != p[k]) { ok = 0; break; }
-		if (ok) return 1;
-	}
-	return 0;
-}
-
 typedef struct {
 	int             is_class;
 	int             negate;
@@ -365,17 +353,6 @@ static int bm_atoms_find(int as, int ae, const atom_t *atoms, int na, const uint
 	}
 }
 
-/* General "find" matcher over the restricted regex grammar (anchors plus
- * literal / character-class atoms). Drives the rare rule-context fall-through
- * cases; the language-guessing patterns use the pre-parsed form. */
-static int bm_regex_atom_match(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
-{
-	atom_t atoms[BMPM_CAP_CONTEXT_CPS];
-	int as, ae;
-	int na = bm_parse_regex(R, Rn, atoms, BMPM_CAP_CONTEXT_CPS, &as, &ae);
-	return bm_atoms_find(as, ae, atoms, na, seg, sn);
-}
-
 static int bm_decode_buf_or_fail(const char *s, uint32_t *buf, int cap, const char *what)
 {
 	int n = ph_u8_decode_buf(s, buf, cap);
@@ -385,13 +362,37 @@ static int bm_decode_buf_or_fail(const char *s, uint32_t *buf, int cap, const ch
 	return n;
 }
 
-/* Predecode contexts at MINIT: side 0 adds trailing '$', side 1 leading '^'. */
-static uint32_t *bm_build_ctx_R(const char *raw, int side, int *Rn_out)
+/* A rule context compiled at MINIT into the matcher Commons Codec's
+ * pattern() dispatch selects for it, including literal '.' handling. */
+typedef enum {
+	CTX_ANY,         /* "^" or "$" alone */
+	CTX_EQ,          /* ^lit$, including "^$" */
+	CTX_PREFIX,      /* ^lit */
+	CTX_SUFFIX,      /* lit$ */
+	CTX_CLASS_ONLY,  /* ^[cls]$ */
+	CTX_CLASS_FIRST, /* ^[cls] */
+	CTX_CLASS_LAST,  /* [cls]$ */
+	CTX_REGEX        /* anything else: pre-parsed atoms */
+} ctx_kind;
+
+typedef struct {
+	uint32_t       *R;      /* owned; content, cls and atoms point into it */
+	ctx_kind        kind;
+	const uint32_t *s;      /* literal content or class members */
+	int             sn;
+	int             should; /* class membership result that matches */
+	atom_t         *atoms;  /* CTX_REGEX only, owned */
+	int             na, as, ae;
+} ctx_t;
+
+/* Predecode at MINIT: side 0 adds trailing '$', side 1 leading '^'. */
+static void bm_build_ctx(const char *raw, int side, ctx_t *ctx)
 {
 	uint32_t rb[BMPM_CAP_CONTEXT_CPS];
 	int rn = bm_decode_buf_or_fail(raw, rb, BMPM_CAP_CONTEXT_CPS, "rule context");
-	int Rn = 0, i;
+	int Rn = 0, i, sw, ew, cn, boxes = 0;
 	uint32_t *R = pemalloc((size_t) (rn + 1) * sizeof(uint32_t), 1);
+	const uint32_t *content;
 
 	if (side == 1) {
 		R[Rn++] = '^';
@@ -400,50 +401,58 @@ static uint32_t *bm_build_ctx_R(const char *raw, int side, int *Rn_out)
 		for (i = 0; i < rn; i++) R[Rn++] = rb[i];
 		R[Rn++] = '$';
 	}
-	*Rn_out = Rn;
-	return R;
-}
+	ctx->R = R;
+	ctx->atoms = NULL;
 
-/* Match Commons Codec's pattern() dispatch, including literal '.' handling. */
-static int bm_ctx_match_pre(const uint32_t *R, int Rn, const uint32_t *seg, int sn)
-{
-	int i;
-	int sw = Rn > 0 && R[0] == '^';
-	int ew = Rn > 0 && R[Rn - 1] == '$';
-	const uint32_t *content = R + (sw ? 1 : 0);
-	int cn = Rn - (sw ? 1 : 0) - (ew ? 1 : 0);
-	int boxes = 0;
+	sw = R[0] == '^';
+	ew = R[Rn - 1] == '$';
+	content = R + (sw ? 1 : 0);
+	cn = Rn - (sw ? 1 : 0) - (ew ? 1 : 0);
+	ctx->s = content;
+	ctx->sn = cn;
 	for (i = 0; i < cn; i++) if (content[i] == '[') { boxes = 1; break; }
 
 	if (!boxes) {
-		if (sw && ew) {
-			if (cn == 0) return sn == 0;
-			return bm_seqeq(seg, sn, content, cn);
-		}
-		if ((sw || ew) && cn == 0) return 1;
-		if (sw) return bm_prefixeq(seg, sn, content, cn);
-		if (ew) return bm_suffixeq(seg, sn, content, cn);
-		return bm_substr_find(seg, sn, content, cn);
-	} else {
-		int swB = cn > 0 && content[0] == '[';
-		int ewB = cn > 0 && content[cn - 1] == ']';
-		if (swB && ewB) {
-			const uint32_t *inner = content + 1;
-			int in_n = cn - 2;
-			int hasInner = 0;
-			for (i = 0; i < in_n; i++) if (inner[i] == '[') { hasInner = 1; break; }
-			if (!hasInner) {
-				int negate = in_n > 0 && inner[0] == '^';
-				const uint32_t *cls = inner + (negate ? 1 : 0);
-				int clsn = in_n - (negate ? 1 : 0);
-				int should = !negate;
-				if (sw && ew) return sn == 1 && (bm_classmember(cls, clsn, seg[0]) == should);
-				if (sw) return sn > 0 && (bm_classmember(cls, clsn, seg[0]) == should);
-				if (ew) return sn > 0 && (bm_classmember(cls, clsn, seg[sn - 1]) == should);
-			}
-		}
-		return bm_regex_atom_match(R, Rn, seg, sn);
+		if (sw && ew) ctx->kind = CTX_EQ;
+		else if (cn == 0) ctx->kind = CTX_ANY;
+		else ctx->kind = sw ? CTX_PREFIX : CTX_SUFFIX;
+		return;
 	}
+	if (content[0] == '[' && content[cn - 1] == ']') {
+		const uint32_t *inner = content + 1;
+		int in_n = cn - 2, hasInner = 0;
+		for (i = 0; i < in_n; i++) if (inner[i] == '[') { hasInner = 1; break; }
+		if (!hasInner) {
+			int negate = in_n > 0 && inner[0] == '^';
+			ctx->s = inner + (negate ? 1 : 0);
+			ctx->sn = in_n - (negate ? 1 : 0);
+			ctx->should = !negate;
+			ctx->kind = sw && ew ? CTX_CLASS_ONLY : sw ? CTX_CLASS_FIRST : CTX_CLASS_LAST;
+			return;
+		}
+	}
+	{
+		atom_t tmp[BMPM_CAP_CONTEXT_CPS];
+		ctx->kind = CTX_REGEX;
+		ctx->na = bm_parse_regex(R, Rn, tmp, BMPM_CAP_CONTEXT_CPS, &ctx->as, &ctx->ae);
+		ctx->atoms = pemalloc((ctx->na ? (size_t) ctx->na : 1) * sizeof(atom_t), 1);
+		if (ctx->na) memcpy(ctx->atoms, tmp, (size_t) ctx->na * sizeof(atom_t));
+	}
+}
+
+static zend_always_inline int bm_ctx_match(const ctx_t *ctx, const uint32_t *seg, int sn)
+{
+	switch (ctx->kind) {
+		case CTX_ANY:         return 1;
+		case CTX_EQ:          return bm_seqeq(seg, sn, ctx->s, ctx->sn);
+		case CTX_PREFIX:      return bm_prefixeq(seg, sn, ctx->s, ctx->sn);
+		case CTX_SUFFIX:      return bm_suffixeq(seg, sn, ctx->s, ctx->sn);
+		case CTX_CLASS_ONLY:  return sn == 1 && bm_classmember(ctx->s, ctx->sn, seg[0]) == ctx->should;
+		case CTX_CLASS_FIRST: return sn > 0 && bm_classmember(ctx->s, ctx->sn, seg[0]) == ctx->should;
+		case CTX_CLASS_LAST:  return sn > 0 && bm_classmember(ctx->s, ctx->sn, seg[sn - 1]) == ctx->should;
+		case CTX_REGEX:       return bm_atoms_find(ctx->as, ctx->ae, ctx->atoms, ctx->na, seg, sn);
+	}
+	return 0;
 }
 
 /* t != NULL iff tn > PHON_INL; otherwise text lives in inl[].
@@ -699,10 +708,8 @@ static zend_result pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm
 typedef struct {
 	const uint32_t *pat;
 	int             plen;
-	uint32_t       *lctx;    /* decoded lcontext + '$' (side 0), built at MINIT */
-	int             lctx_n;
-	uint32_t       *rctx;    /* decoded '^' + rcontext (side 1) */
-	int             rctx_n;
+	ctx_t           lctx;    /* lcontext + '$' (side 0), compiled at MINIT */
+	ctx_t           rctx;    /* '^' + rcontext (side 1) */
 	alt_t          *alts;    /* pre-parsed phoneme alternatives (4th column) */
 	int             nalts;
 } rule_decoded;
@@ -767,8 +774,8 @@ static zend_result bm_run_main(pbuilder *pb, const bmpm_ruleset *rs, const rules
 				if (plen <= 0) continue;   /* empty pattern: adv=0 would loop forever */
 				if (plen > n - i) continue;
 				if (!bm_seqeq(cp + i, plen, pat, plen)) continue;
-				if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, cp + i + plen, n - i - plen)) continue;
-				if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, cp, i)) continue;
+				if (!bm_ctx_match(&ix->decoded[r].rctx, cp + i + plen, n - i - plen)) continue;
+				if (!bm_ctx_match(&ix->decoded[r].lctx, cp, i)) continue;
 				if (pb_apply(pb, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud) == FAILURE) {
 					return FAILURE;
 				}
@@ -864,8 +871,8 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
 						if (plen <= 0) continue;   /* empty pattern: adv=0 would loop forever */
 						if (plen > tn - i) continue;
 						if (!bm_seqeq(tcp + i, plen, pat, plen)) continue;
-						if (!bm_ctx_match_pre(ix->decoded[r].rctx, ix->decoded[r].rctx_n, tcp + i + plen, tn - i - plen)) continue;
-						if (!bm_ctx_match_pre(ix->decoded[r].lctx, ix->decoded[r].lctx_n, tcp, i)) continue;
+						if (!bm_ctx_match(&ix->decoded[r].rctx, tcp + i + plen, tn - i - plen)) continue;
+						if (!bm_ctx_match(&ix->decoded[r].lctx, tcp, i)) continue;
 						if (pb_apply(&sub, ix->decoded[r].alts, ix->decoded[r].nalts, max, bud) == FAILURE) {
 							if (tcp != stk) efree(tcp);
 							pb_free(&sub);
@@ -1021,8 +1028,7 @@ typedef struct {
 	int       na;
 	langset_t mask;
 	int       accept;
-	uint32_t *req_lit;   /* literal atoms the rule needs present to match */
-	int       req_n;
+	uint64_t  req[4];    /* bm_cp_bit set of literal atoms the rule needs present to match */
 } lang_parsed;
 
 typedef struct {
@@ -1068,12 +1074,10 @@ static langset_t bm_guess_languages(int nt, const uint32_t *cp, int n, bm_budget
 
 	for (r = 0; r < li->count; r++) {
 		const lang_parsed *lp = &li->rules[r];
-		int q, skip = 0;
-		for (q = 0; q < lp->req_n; q++) {
-			unsigned bit = bm_cp_bit(lp->req_lit[q]);
-			if (!(present[bit >> 6] & ((uint64_t) 1 << (bit & 63)))) { skip = 1; break; }
+		if ((lp->req[0] & ~present[0]) | (lp->req[1] & ~present[1])
+				| (lp->req[2] & ~present[2]) | (lp->req[3] & ~present[3])) {
+			continue;
 		}
-		if (skip) continue;
 		if (bm_atoms_find(lp->as, lp->ae, lp->atoms, lp->na, cp, n)) {
 			if (lp->accept) mask &= lp->mask;
 			else mask &= ~lp->mask;
@@ -1597,8 +1601,8 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 		bm_decode_buf_or_fail(rs->rules[i].pattern, ix->arena + pos, pl, "rule pattern");
 		ix->decoded[i].pat = ix->arena + pos;
 		pos += (size_t) pl;
-		ix->decoded[i].lctx = bm_build_ctx_R(rs->rules[i].lcontext, 0, &ix->decoded[i].lctx_n);
-		ix->decoded[i].rctx = bm_build_ctx_R(rs->rules[i].rcontext, 1, &ix->decoded[i].rctx_n);
+		bm_build_ctx(rs->rules[i].lcontext, 0, &ix->decoded[i].lctx);
+		bm_build_ctx(rs->rules[i].rcontext, 1, &ix->decoded[i].rctx);
 		/* pre-parse the phoneme column (alt texts point into the static rule
 		 * data), so pb_apply never re-parses it at match time */
 		na = bm_parse_phoneme_expr(rs->rules[i].phoneme, rs->name_type, tmp_alts, BMPM_CAP_PHONEME_ALTS + 1);
@@ -1666,12 +1670,13 @@ static void bm_build_lang_index(const bmpm_lang_set *S, int nt, langset_index *l
 		/* Literal atoms must all appear in the input for any match, so
 		 * bm_guess_languages can skip the substring scan when one is absent. */
 		{
-			int q, rc = 0;
-			for (q = 0; q < na; q++) if (!tmp[q].is_class) rc++;
-			lp->req_lit = pemalloc((rc ? (size_t) rc : 1) * sizeof(uint32_t), 1);
-			lp->req_n = rc;
-			rc = 0;
-			for (q = 0; q < na; q++) if (!tmp[q].is_class) lp->req_lit[rc++] = tmp[q].lit;
+			int q;
+			for (q = 0; q < na; q++) {
+				if (!tmp[q].is_class) {
+					unsigned bit = bm_cp_bit(tmp[q].lit);
+					lp->req[bit >> 6] |= (uint64_t) 1 << (bit & 63);
+				}
+			}
 		}
 	}
 }
@@ -1698,8 +1703,10 @@ void bmpm_mshutdown(void)
 			if (ix->decoded) {
 				size_t d;
 				for (d = 0; d < ix->count; d++) {
-					if (ix->decoded[d].lctx) pefree(ix->decoded[d].lctx, 1);
-					if (ix->decoded[d].rctx) pefree(ix->decoded[d].rctx, 1);
+					if (ix->decoded[d].lctx.R) pefree(ix->decoded[d].lctx.R, 1);
+					if (ix->decoded[d].lctx.atoms) pefree(ix->decoded[d].lctx.atoms, 1);
+					if (ix->decoded[d].rctx.R) pefree(ix->decoded[d].rctx.R, 1);
+					if (ix->decoded[d].rctx.atoms) pefree(ix->decoded[d].rctx.atoms, 1);
 					if (ix->decoded[d].alts) pefree(ix->decoded[d].alts, 1);
 				}
 				pefree(ix->decoded, 1);
@@ -1719,7 +1726,6 @@ void bmpm_mshutdown(void)
 			for (r = 0; r < li->count; r++) {
 				if (li->rules[r].R) pefree(li->rules[r].R, 1);
 				if (li->rules[r].atoms) pefree(li->rules[r].atoms, 1);
-				if (li->rules[r].req_lit) pefree(li->rules[r].req_lit, 1);
 			}
 			if (li->rules) pefree(li->rules, 1);
 		}

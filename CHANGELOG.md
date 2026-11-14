@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- BMPM rule contexts are classified and parsed once at startup instead of on
+  every candidate rule match, and language guessing tests a rule's required
+  letters with one bitmask check. `bmpm()` and `bmpm_match()` take about
+  10-20% less time on Latin-script surnames. Matching rules are unchanged;
+  `tests/bmpm_corpus_digest.phpt` pins the encodings of a generated corpus
+  for each name type and accuracy, and for each named forced language at
+  approximate accuracy.
 - BMPM language guessing skips rules whose required non-ASCII letters are
   absent from the input, as it already did for ASCII letters. `bmpm()` runs
   15-25% faster on Latin-script surnames and 40-55% faster on accented and
