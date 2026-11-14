@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Daitch-Mokotoff Soundex orders each first-byte rule bucket longest-first at
   startup, allowing encoding to stop at the first matching pattern. Encoded
   codes, branch order, matching behavior, and resource limits are unchanged.
+- Daitch-Mokotoff Soundex compares rule patterns inline after the bucket's
+  first byte, and compares and hashes branch codes as one zero-padded 8-byte
+  word instead of with `strcmp()` and a per-byte FNV-1a hash. `dm_soundex()`
+  and `dm_soundex_match()` take about 13-20% less time on name lists. Codes,
+  branch order, matches, work-budget errors, the input byte cap, and the
+  128-branch cap are unchanged; `tests/dm_soundex_corpus_digest.phpt` pins the
+  codes and matches of a generated corpus.
 - NYSIIS uses stack scratch space for inputs shorter than 128 bytes, avoiding
   a temporary heap allocation in both `nysiis()` and `nysiis_match()`. Longer
   inputs keep the heap-backed path; encoded keys and length limits are unchanged.
