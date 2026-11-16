@@ -339,7 +339,7 @@ operands of a match helper):
 Double Metaphone checks the folded-byte limit for each operand it encodes;
 `max_length` separately limits the returned keys. See the
 [folded-input bound](src/double_metaphone.c#L28-L33) and its
-[validation](src/double_metaphone.c#L713-L724).
+[`dmet_codes()` validation](src/double_metaphone.c#L770-L785).
 
 Double Metaphone, NYSIIS, and Match Rating run in linear time. Match Rating uses
 constant temporary space; Double Metaphone and NYSIIS use linear space. Bound
