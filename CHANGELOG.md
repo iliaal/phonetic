@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branch order, matches, work-budget errors, the input byte cap, and the
   128-branch cap are unchanged; `tests/dm_soundex_corpus_digest.phpt` pins the
   codes and matches of a generated corpus.
+- Daitch-Mokotoff Soundex keeps the cleaned input in a 256-byte stack buffer
+  and each branch set's first 8 branches inline, and tracks code-alternative
+  lengths instead of calling `strlen()`, `memcmp()`, and `strcmp()` on
+  replacements of at most 3 characters. `dm_soundex()` and
+  `dm_soundex_match()` take about 15-21% less time on name lists. Longer
+  cleaned inputs and larger sets move to heap storage. Codes, branch order,
+  matches, work-budget errors, the input byte cap, and the 128-branch cap are
+  unchanged; `tests/dm_soundex_corpus_digest.phpt` pins the codes and matches
+  of a generated corpus.
 - NYSIIS uses stack scratch space for inputs shorter than 128 bytes, avoiding
   a temporary heap allocation in both `nysiis()` and `nysiis_match()`. Longer
   inputs keep the heap-backed path; encoded keys and length limits are unchanged.

@@ -21,7 +21,6 @@
 
 #include "php.h"
 #include "php_phonetic.h"
-#include "zend_smart_str.h"
 #include "phonetic_utf8.h"
 #include "dm_data.h"
 
@@ -50,7 +49,8 @@ static int dms_is_ws(uint32_t cp)
 typedef struct {
 	char code[8];             /* accumulated digits, NUL-terminated, zero-padded */
 	int  len;
-	char lastrep[4];          /* last replacement applied (<= 3 chars) */
+	char lastrep[4];          /* last replacement applied (<= 3 chars), zero-padded */
+	int  lastlen;             /* strlen(lastrep) */
 	int  last_null;           /* 1 while no replacement has been applied yet */
 } dms_branch;
 
@@ -63,34 +63,42 @@ typedef struct {
 #define DMS_MAX_BRANCHES 128
 #define DMS_MAX_WORK 32768
 
+/* Parsed alternatives (at most DMS_CAP_CODE_LEN chars) fit a zero-padded lastrep row. */
+typedef char dms_alt_fits_lastrep[DMS_CAP_CODE_LEN < sizeof(((dms_branch *) 0)->lastrep) ? 1 : -1];
+
+/* Branches kept inline in the set before the first heap allocation. */
+#define DMS_INLINE_BRANCHES 8
+
 typedef struct {
-	dms_branch *b;
+	dms_branch *b;      /* inl until the set outgrows it, then heap */
 	int         n;
 	int         cap;
 	int        *hash;   /* open addressing: slot holds (b-index + 1); 0 = empty */
 	int         hmask;  /* (hash size - 1), a power-of-two mask; 0 when unbuilt */
+	dms_branch  inl[DMS_INLINE_BRANCHES];
 } dms_set;
 
+/* Sets point into themselves, so they are used in place and never copied. */
 static void dms_set_init(dms_set *s)
 {
-	s->b = NULL;
+	s->b = s->inl;
 	s->n = 0;
-	s->cap = 0;
+	s->cap = DMS_INLINE_BRANCHES;
 	s->hash = NULL;
 	s->hmask = 0;
 }
 
 static void dms_set_free(dms_set *s)
 {
-	if (s->b) {
+	if (s->b != s->inl) {
 		efree(s->b);
 	}
 	if (s->hash) {
 		efree(s->hash);
 	}
-	s->b = NULL;
+	s->b = s->inl;
 	s->n = 0;
-	s->cap = 0;
+	s->cap = DMS_INLINE_BRANCHES;
 	s->hash = NULL;
 	s->hmask = 0;
 }
@@ -143,8 +151,13 @@ static void dms_set_push(dms_set *s, const dms_branch *br)
 		return;
 	}
 	if (s->n == s->cap) {
-		s->cap = s->cap ? s->cap * 2 : 8;
-		s->b = erealloc(s->b, (size_t) s->cap * sizeof(dms_branch));
+		s->cap *= 2;
+		if (s->b == s->inl) {
+			s->b = emalloc((size_t) s->cap * sizeof(dms_branch));
+			memcpy(s->b, s->inl, sizeof s->inl);
+		} else {
+			s->b = erealloc(s->b, (size_t) s->cap * sizeof(dms_branch));
+		}
 		if (s->hash) {
 			dms_hash_build(s);
 		}
@@ -209,24 +222,30 @@ static void dms_set_reset(dms_set *s)
 
 /* Commons Codec Branch.processNextReplacement. A replacement is skipped when
  * the previous replacement already ends with it, unless forced (mn/nm). */
-static void dms_process(dms_branch *br, const char *rep, int force)
+static void dms_process(dms_branch *br, const char *rep, int replen, int force)
 {
-	size_t replen = strlen(rep);
 	int append;
 
 	if (br->last_null || force) {
 		append = 1;
 	} else {
-		size_t ll = strlen(br->lastrep);
+		int ll = br->lastlen;
 		if (replen > ll) {
 			append = 1;
 		} else {
-			append = memcmp(br->lastrep + ll - replen, rep, replen) != 0;
+			int k;
+			append = 0;
+			for (k = 0; k < replen; k++) {
+				if (br->lastrep[ll - replen + k] != rep[k]) {
+					append = 1;
+					break;
+				}
+			}
 		}
 	}
 
 	if (append && br->len < DMS_MAX) {
-		size_t i;
+		int i;
 		for (i = 0; i < replen && br->len < DMS_MAX; i++) {
 			br->code[br->len++] = rep[i];
 		}
@@ -234,12 +253,14 @@ static void dms_process(dms_branch *br, const char *rep, int force)
 	}
 
 	/* Update lastrep even when no digits were appended; oversized rules are corrupt. */
-	if (replen > sizeof(br->lastrep) - 1) {
+	if (replen > (int) sizeof(br->lastrep) - 1) {
 		zend_error_noreturn(E_CORE_ERROR,
 			"phonetic: DM rule code alternative exceeds %d chars",
 			(int) (sizeof(br->lastrep) - 1));
 	}
-	memcpy(br->lastrep, rep, replen + 1);
+	/* rep is a zero-padded row of at least sizeof(lastrep) bytes. */
+	memcpy(br->lastrep, rep, sizeof br->lastrep);
+	br->lastlen = replen;
 	br->last_null = 0;
 }
 
@@ -303,9 +324,37 @@ void dms_mshutdown(void)
 	if (g_dms_order)  { pefree(g_dms_order, 1);  g_dms_order = NULL; }
 }
 
+/* Cleaned-input buffer: starts on the caller's stack and moves to the heap
+ * only when a long input outgrows it. */
+#define DMS_CLEAN_INLINE 256
+
+typedef struct {
+	char  *p;
+	size_t len;
+	size_t cap;
+	char   inl[DMS_CLEAN_INLINE];
+} dms_buf;
+
+static void dms_buf_append(dms_buf *b, const char *s, size_t n)
+{
+	/* Appends are at most 4 bytes and cap starts at 256, so one doubling fits. */
+	if (n > b->cap - b->len) {
+		size_t cap = b->cap * 2;
+		if (b->p == b->inl) {
+			b->p = emalloc(cap);
+			memcpy(b->p, b->inl, b->len);
+		} else {
+			b->p = erealloc(b->p, cap);
+		}
+		b->cap = cap;
+	}
+	memcpy(b->p + b->len, s, n);
+	b->len += n;
+}
+
 /* Clean the input: drop whitespace, lower-case, then apply accent/ligature
  * folding. Output is a UTF-8 byte run. */
-static void dms_cleanup(const char *s, size_t len, smart_str *out)
+static void dms_cleanup(const char *s, size_t len, dms_buf *out)
 {
 	size_t i = 0;
 
@@ -321,7 +370,8 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 		cp = ph_lc_latin(cp);
 
 		if (cp < 0x80) {
-			smart_str_appendc(out, (char) cp);
+			char c = (char) cp;
+			dms_buf_append(out, &c, 1);
 			continue;
 		}
 
@@ -333,13 +383,13 @@ static void dms_cleanup(const char *s, size_t len, smart_str *out)
 			for (f = 0; f < dm_foldings_count; f++) {
 				if (dm_foldings[f].from_len == tl
 						&& memcmp(dm_foldings[f].from, tmp, (size_t) tl) == 0) {
-					smart_str_appends(out, dm_foldings[f].to);
+					dms_buf_append(out, dm_foldings[f].to, strlen(dm_foldings[f].to));
 					folded = 1;
 					break;
 				}
 			}
 			if (!folded) {
-				smart_str_appendl(out, tmp, (size_t) tl);
+				dms_buf_append(out, tmp, (size_t) tl);
 			}
 		}
 	}
@@ -432,7 +482,9 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 		if (transition[generation] != field || transition_force[generation] != force) {
 			int previous_n = next->n;
 			int unchanged = 1;
-			char alts[DMS_CAP_CODE_ALTS][DMS_CAP_CODE_LEN + 1];
+			/* Zero-padded rows, so lastrep compares as one word. */
+			char alts[DMS_CAP_CODE_ALTS][sizeof(((dms_branch *) 0)->lastrep)] = {{0}};
+			int altlen[DMS_CAP_CODE_ALTS];
 			int nalts = 0;
 
 			/* Cached transitions do not consume alternatives: parse only when
@@ -443,7 +495,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 				int wl = 0;
 				for (;;) {
 					if (*p == '|' || *p == '\0') {
-						alts[nalts][wl] = '\0';
+						altlen[nalts] = wl;
 						nalts++;
 						if (*p == '\0') {
 							break;
@@ -478,7 +530,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 						goto done;
 					}
 					work++;
-					dms_process(&nb, alts[ai], force);
+					dms_process(&nb, alts[ai], altlen[ai], force);
 					if (dms_set_find(next, nb.code) >= 0) {
 						continue;
 					}
@@ -490,7 +542,7 @@ static int dms_encode(const char *buf, size_t buflen, dms_set *out)
 							unchanged = old->len == nb.len &&
 								old->last_null == nb.last_null &&
 								dms_code_word(old->code) == dms_code_word(nb.code) &&
-								strcmp(old->lastrep, nb.lastrep) == 0;
+								memcmp(old->lastrep, nb.lastrep, sizeof nb.lastrep) == 0;
 						}
 					}
 					dms_set_push(next, &nb);
@@ -542,18 +594,21 @@ done:
  * actually coded (at least one rule matched), 0 otherwise, or -1 on error. */
 static int dms_codes(zend_string *input, dms_set *out)
 {
-	smart_str cleaned = {0};
+	dms_buf cleaned;
 	int coded;
 
 	dms_set_init(out);
 	if (ZSTR_LEN(input) == 0) {
 		return 0;
 	}
+	cleaned.p = cleaned.inl;
+	cleaned.len = 0;
+	cleaned.cap = sizeof cleaned.inl;
 	dms_cleanup(ZSTR_VAL(input), ZSTR_LEN(input), &cleaned);
-	smart_str_0(&cleaned);
-	coded = dms_encode(cleaned.s ? ZSTR_VAL(cleaned.s) : "",
-	                   cleaned.s ? ZSTR_LEN(cleaned.s) : 0, out);
-	smart_str_free(&cleaned);
+	coded = dms_encode(cleaned.p, cleaned.len, out);
+	if (cleaned.p != cleaned.inl) {
+		efree(cleaned.p);
+	}
 	return coded;
 }
 
