@@ -21,7 +21,6 @@
 #include <string.h>
 
 #include "php.h"
-#include "zend_smart_str.h"
 #include "php_phonetic.h"
 #include "phonetic_utf8.h"
 
@@ -31,6 +30,70 @@
 #define DMET_POSTPAD 8
 #define DMET_SENTINEL '-'
 #define DMET_MAX_FOLDED_INPUT (INT_MAX - (DMET_PREPAD + DMET_POSTPAD + 1))
+#define DMET_INLINE 128
+
+/* Byte buffer that lives on the caller's stack until it outgrows DMET_INLINE.
+ * Typical names need no heap allocation for the folded input or either code. */
+typedef struct {
+	char *v;
+	size_t len;
+	size_t size;
+	char inl[DMET_INLINE];
+} dmet_buf;
+
+static zend_string *dmet_key_primary;
+static zend_string *dmet_key_alternate;
+
+static zend_always_inline void dmet_buf_init(dmet_buf *b)
+{
+	b->v = b->inl;
+	b->len = 0;
+	b->size = DMET_INLINE;
+}
+
+/* Page-sized steps, like smart_str, keep peak memory on huge inputs at base levels. */
+static zend_never_inline void dmet_buf_grow(dmet_buf *b, size_t n)
+{
+	size_t size = ZEND_MM_ALIGNED_SIZE_EX(zend_safe_address_guarded(1, b->len, n), 4096);
+
+	if (b->v == b->inl) {
+		b->v = emalloc(size);
+		memcpy(b->v, b->inl, b->len);
+	} else {
+		b->v = erealloc(b->v, size);
+	}
+	b->size = size;
+}
+
+static zend_always_inline void dmet_buf_putl(dmet_buf *b, const char *s, size_t n)
+{
+	if (UNEXPECTED(b->size - b->len < n)) {
+		dmet_buf_grow(b, n);
+	}
+	memcpy(b->v + b->len, s, n);
+	b->len += n;
+}
+
+static zend_always_inline void dmet_buf_putc(dmet_buf *b, char c)
+{
+	if (UNEXPECTED(b->len == b->size)) {
+		dmet_buf_grow(b, 1);
+	}
+	b->v[b->len++] = c;
+}
+
+/* Phoneme literals are one or two bytes. */
+static zend_always_inline void dmet_buf_puts(dmet_buf *b, const char *s)
+{
+	dmet_buf_putl(b, s, s[1] ? 2 : 1);
+}
+
+static zend_always_inline void dmet_buf_free(dmet_buf *b)
+{
+	if (b->v != b->inl) {
+		efree(b->v);
+	}
+}
 
 static zend_always_inline int dmet_is_vowel(char c)
 {
@@ -94,7 +157,7 @@ static const char *dmet_fold_cp(unsigned cp)
 
 /* Preserve ASCII separators and spaces, but drop unmapped non-ASCII.
  * Dropping a separator such as NBSP can join S + CH into SCH. */
-static void dmet_fold(const char *src, size_t len, smart_str *out)
+static void dmet_fold(const char *src, size_t len, dmet_buf *out)
 {
 	size_t i = 0;
 
@@ -106,12 +169,12 @@ static void dmet_fold(const char *src, size_t len, smart_str *out)
 		if (cp < 0x80) {
 			/* Avoid LC_CTYPE-dependent toupper(): setlocale() must not change encoding. */
 			char u = (cp >= 'a' && cp <= 'z') ? (char) (cp - 'a' + 'A') : (char) cp;
-			smart_str_appendc(out, u);
+			dmet_buf_putc(out, u);
 		} else {
 			const char *mapped = dmet_fold_cp((unsigned) cp);
 
 			if (mapped) {
-				smart_str_appends(out, mapped);
+				dmet_buf_puts(out, mapped);
 			}
 		}
 	}
@@ -122,7 +185,7 @@ static void dmet_fold(const char *src, size_t len, smart_str *out)
  * codes into the supplied buffers. When max_length > 0, stop once both codes
  * have reached that length (still post-truncate multi-char emissions that
  * overshoot). max_length <= 0 means unlimited (full codes). */
-static void dmet_encode(const char *buf, size_t len, smart_str *primary, smart_str *secondary,
+static void dmet_encode(const char *buf, size_t len, dmet_buf *primary, dmet_buf *secondary,
 	zend_long max_length)
 {
 	int total, start, end, pos, slavo;
@@ -175,8 +238,8 @@ static void dmet_encode(const char *buf, size_t len, smart_str *primary, smart_s
 		pos++;
 	}
 	if (B(start) == 'X') {
-		smart_str_appendc(primary, 'S');
-		smart_str_appendc(secondary, 'S');
+		dmet_buf_putc(primary, 'S');
+		dmet_buf_putc(secondary, 'S');
 		pos++;
 	}
 
@@ -682,19 +745,17 @@ static void dmet_encode(const char *buf, size_t len, smart_str *primary, smart_s
 		}
 
 		if (pc) {
-			smart_str_appends(primary, pc);
+			dmet_buf_puts(primary, pc);
 		}
 		if (sc) {
-			smart_str_appends(secondary, sc);
+			dmet_buf_puts(secondary, sc);
 		}
 		pos += adv;
 
 		/* Commons Codec stops when both codes have reached maxCodeLength.
 		 * Keep post-truncation for multi-char emissions that overshoot. */
 		if (cap > 0) {
-			size_t pl = primary->s ? ZSTR_LEN(primary->s) : 0;
-			size_t sl = secondary->s ? ZSTR_LEN(secondary->s) : 0;
-			if (pl >= cap && sl >= cap) {
+			if (primary->len >= cap && secondary->len >= cap) {
 				break;
 			}
 		}
@@ -706,45 +767,43 @@ static void dmet_encode(const char *buf, size_t len, smart_str *primary, smart_s
 }
 
 /* Fold + encode one string; max_length <= 0 means full untruncated codes. */
-static int dmet_codes(const char *in, size_t len, uint32_t arg_num, smart_str *primary, smart_str *secondary,
+static int dmet_codes(const char *in, size_t len, uint32_t arg_num, dmet_buf *primary, dmet_buf *secondary,
 	zend_long max_length)
 {
-	smart_str folded = {0};
+	dmet_buf folded;
 	size_t folded_len;
 
 	/* Fold directly into the padded buffer consumed by the encoder. */
-	smart_str_appendl(&folded, "--", DMET_PREPAD);
+	dmet_buf_init(&folded);
+	dmet_buf_putl(&folded, "--", DMET_PREPAD);
 	dmet_fold(in, len, &folded);
-	folded_len = ZSTR_LEN(folded.s) - DMET_PREPAD;
+	folded_len = folded.len - DMET_PREPAD;
 	if (folded_len > (size_t) DMET_MAX_FOLDED_INPUT) {
-		smart_str_free(&folded);
+		dmet_buf_free(&folded);
 		zend_argument_value_error(arg_num, "must not exceed %d bytes after folding", DMET_MAX_FOLDED_INPUT);
 		return FAILURE;
 	}
 	if (folded_len > 0) {
-		smart_str_appendl(&folded, "--------", DMET_POSTPAD);
-		dmet_encode(ZSTR_VAL(folded.s), folded_len, primary, secondary, max_length);
+		dmet_buf_putl(&folded, "--------", DMET_POSTPAD);
+		dmet_encode(folded.v, folded_len, primary, secondary, max_length);
 	}
-	if (primary->s != NULL) {
-		smart_str_0(primary);
-	}
-	if (secondary->s != NULL) {
-		smart_str_0(secondary);
-	}
-	smart_str_free(&folded);
+	dmet_buf_free(&folded);
 	return SUCCESS;
+}
+
+void dmet_minit(void)
+{
+	dmet_key_primary = zend_string_init_interned("primary", sizeof("primary") - 1, 1);
+	dmet_key_alternate = zend_string_init_interned("alternate", sizeof("alternate") - 1, 1);
 }
 
 PHP_FUNCTION(double_metaphone)
 {
 	zend_string *input;
 	zend_long max_length = 4;
-	smart_str primary = {0};
-	smart_str secondary = {0};
-	const char *pval = "";
-	const char *sval = "";
-	size_t plen = 0;
-	size_t slen = 0;
+	dmet_buf primary, secondary;
+	size_t plen, slen;
+	zval code;
 
 	ZEND_PARSE_PARAMETERS_START(1, 2)
 		Z_PARAM_STR(input)
@@ -752,20 +811,16 @@ PHP_FUNCTION(double_metaphone)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
+	dmet_buf_init(&primary);
+	dmet_buf_init(&secondary);
 	if (dmet_codes(ZSTR_VAL(input), ZSTR_LEN(input), 1, &primary, &secondary, max_length) == FAILURE) {
-		smart_str_free(&primary);
-		smart_str_free(&secondary);
+		dmet_buf_free(&primary);
+		dmet_buf_free(&secondary);
 		RETURN_THROWS();
 	}
 
-	if (primary.s != NULL) {
-		pval = ZSTR_VAL(primary.s);
-		plen = ZSTR_LEN(primary.s);
-	}
-	if (secondary.s != NULL) {
-		sval = ZSTR_VAL(secondary.s);
-		slen = ZSTR_LEN(secondary.s);
-	}
+	plen = primary.len;
+	slen = secondary.len;
 
 	/* Trim multi-character emissions that overshoot the encoder's early-exit cap. */
 	if (max_length > 0) {
@@ -777,32 +832,35 @@ PHP_FUNCTION(double_metaphone)
 		}
 	}
 
+	/* Interned keys skip a key allocation and hash per element. */
 	array_init_size(return_value, 2);
-	add_assoc_stringl(return_value, "primary", (char *) pval, plen);
-	add_assoc_stringl(return_value, "alternate", (char *) sval, slen);
+	ZVAL_STRINGL(&code, primary.v, plen);
+	zend_hash_add_new(Z_ARRVAL_P(return_value), dmet_key_primary, &code);
+	ZVAL_STRINGL(&code, secondary.v, slen);
+	zend_hash_add_new(Z_ARRVAL_P(return_value), dmet_key_alternate, &code);
 
-	smart_str_free(&primary);
-	smart_str_free(&secondary);
+	dmet_buf_free(&primary);
+	dmet_buf_free(&secondary);
 }
 
-static zend_always_inline int dmet_code_eq(const smart_str *x, const smart_str *y, size_t cap)
+static zend_always_inline int dmet_code_eq(const dmet_buf *x, const dmet_buf *y, size_t cap)
 {
-	size_t xl = x->s ? ZSTR_LEN(x->s) : 0;
-	size_t yl = y->s ? ZSTR_LEN(y->s) : 0;
+	size_t xl = x->len;
+	size_t yl = y->len;
 
 	if (xl > cap) xl = cap;
 	if (yl > cap) yl = cap;
 	if (xl == 0 || xl != yl) {
 		return 0;
 	}
-	return memcmp(ZSTR_VAL(x->s), ZSTR_VAL(y->s), xl) == 0;
+	return memcmp(x->v, y->v, xl) == 0;
 }
 
 PHP_FUNCTION(double_metaphone_match)
 {
 	zend_string *a, *b;
 	zend_long max_length = 4;
-	smart_str pa = {0}, sa = {0}, pb = {0}, sb = {0};
+	dmet_buf pa, sa, pb, sb;
 	size_t cap;
 	int pa_set, sa_set;
 	int result = 0;
@@ -814,39 +872,35 @@ PHP_FUNCTION(double_metaphone_match)
 		Z_PARAM_LONG(max_length)
 	ZEND_PARSE_PARAMETERS_END();
 
+	dmet_buf_init(&pa);
+	dmet_buf_init(&sa);
+	dmet_buf_init(&pb);
+	dmet_buf_init(&sb);
+
 	if (dmet_codes(ZSTR_VAL(a), ZSTR_LEN(a), 1, &pa, &sa, max_length) == FAILURE) {
-		smart_str_free(&pa);
-		smart_str_free(&sa);
-		RETURN_THROWS();
+		goto out_throw;
 	}
 
 	/* max_length <= 0 means "no limit": compare the full codes. */
 	cap = (max_length > 0) ? (size_t) max_length : (size_t) -1;
 
-	pa_set = pa.s != NULL && ZSTR_LEN(pa.s) > 0;
-	sa_set = sa.s != NULL && ZSTR_LEN(sa.s) > 0;
+	pa_set = pa.len > 0;
+	sa_set = sa.len > 0;
 
 	/* An alternate-only code ("-EW" -> ""/"F") can match; checking only the
 	 * primary would make the result depend on argument order. */
 	if (!pa_set && !sa_set) {
-		smart_str_free(&pa);
-		smart_str_free(&sa);
-		RETURN_LONG(0);
+		goto out;
 	}
 	/* Identical operands: the primary agrees with itself where it exists,
 	 * otherwise the alternate is the only code that can cross. */
 	if (zend_string_equals(a, b)) {
-		smart_str_free(&pa);
-		smart_str_free(&sa);
-		RETURN_LONG(pa_set ? 2 : 1);
+		result = pa_set ? 2 : 1;
+		goto out;
 	}
 
 	if (dmet_codes(ZSTR_VAL(b), ZSTR_LEN(b), 2, &pb, &sb, max_length) == FAILURE) {
-		smart_str_free(&pa);
-		smart_str_free(&sa);
-		smart_str_free(&pb);
-		smart_str_free(&sb);
-		RETURN_THROWS();
+		goto out_throw;
 	}
 
 	if (dmet_code_eq(&pa, &pb, cap)) {
@@ -856,10 +910,17 @@ PHP_FUNCTION(double_metaphone_match)
 		result = 1;                                       /* an alternate crosses */
 	}
 
-	smart_str_free(&pa);
-	smart_str_free(&sa);
-	smart_str_free(&pb);
-	smart_str_free(&sb);
-
+out:
+	dmet_buf_free(&pa);
+	dmet_buf_free(&sa);
+	dmet_buf_free(&pb);
+	dmet_buf_free(&sb);
 	RETURN_LONG(result);
+
+out_throw:
+	dmet_buf_free(&pa);
+	dmet_buf_free(&sa);
+	dmet_buf_free(&pb);
+	dmet_buf_free(&sb);
+	RETURN_THROWS();
 }

@@ -30,4 +30,6 @@ void bmpm_mshutdown(void);
 void dms_minit(void);
 void dms_mshutdown(void);
 
+void dmet_minit(void);
+
 #endif /* PHP_PHONETIC_H */

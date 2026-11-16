@@ -24,6 +24,7 @@ PHP_MINIT_FUNCTION(phonetic)
 	register_phonetic_symbols(module_number);
 	bmpm_minit();
 	dms_minit();
+	dmet_minit();
 	return SUCCESS;
 }
 

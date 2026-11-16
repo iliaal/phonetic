@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm_match()` compares a single indexed phonetic token directly instead of
   building a hash table, avoiding temporary table and token-key allocations.
   Grouped output and exact token boundaries retain the same matching behavior.
+- Double Metaphone folds input and builds both codes in 128-byte stack
+  buffers that move to the heap only when they fill, and `double_metaphone()`
+  inserts its `primary` and `alternate` keys as strings interned at startup.
+  `double_metaphone()` and `double_metaphone_match()` take about 42-45% less
+  time on name lists. Codes and match results are unchanged;
+  `tests/double_metaphone_corpus_digest.phpt` pins them for a generated
+  corpus at several code lengths.
 
 ## [0.4.6] - 2026-10-26
 
