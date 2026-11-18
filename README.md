@@ -263,7 +263,9 @@ For repeated lookups against a fixed corpus, encode once and index the keys (see
   `"russian"`, `"english"`) to force one language. `"any"` is the default ruleset
   label, not a language; passing it raises `ValueError`. Omit the argument to
   auto-detect.
-- BMPM matches on code points and drops unmatched ones.
+- BMPM matches on code points and drops unmatched ones. Turkish capital `İ`
+  lowercases to `i` plus U+0307 (combining dot), as in Java string lowercase;
+  the dot can affect rule contexts even though it emits no phonetic token.
   NFC and NFD forms of the same visual name (e.g. `Café` vs `Cafe` + combining acute)
   can produce different token sets. Prefer NFC (or precomposed Latin) input.
 - Greek capitals are not lowercased (the context-sensitive final sigma can't be
