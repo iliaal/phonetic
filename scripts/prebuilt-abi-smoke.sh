@@ -2,8 +2,10 @@
 # Usage: prebuilt-abi-smoke.sh MODULE.so OLDEST_IMAGE NEWEST_IMAGE
 #
 # Gates a prebuilt Linux module against the oldest and newest patch release
-# of its PHP minor. Each image is a digest-pinned official php:X.Y.Z-cli image;
-# the X.Y.Z in its tag is the PHP_VERSION the image must report.
+# of its PHP minor. Each image is a digest-pinned official php:X.Y.Z-cli image,
+# or a local phonetic-php:X.Y.Z-cli-nts image the release workflow builds
+# earlier in the same job (the official 8.6 images are ZTS-only); the X.Y.Z in
+# its tag is the PHP_VERSION the image must report, and every image must be NTS.
 #
 # 1. Every undefined (non-weak) dynamic symbol of the module must be exported
 #    by the oldest image's php binary or by a library the module itself links
@@ -32,6 +34,15 @@ image_version() {
 # IPs. Prints the reference that was pulled.
 pull_image() {
 	local ref=$1 path prefix candidate attempt
+	if [[ "$ref" =~ ^phonetic-php:[0-9]+\.[0-9]+\.[0-9]+-cli-nts$ ]]; then
+		if docker image inspect "$ref" >/dev/null 2>&1; then
+			echo "using local $ref" >&2
+			printf '%s\n' "$ref"
+			return 0
+		fi
+		echo "::error::local image $ref does not exist" >&2
+		return 1
+	fi
 	if [[ "$ref" != *@sha256:* ]]; then
 		echo "::error::$ref is not pinned by digest" >&2
 		return 1
@@ -115,6 +126,11 @@ status=0
 for image in "$oldest" "$newest"; do
 	want=$(image_version "$image")
 	echo "== $(basename "$module"): load and smoke on $image (PHP $want)"
+	if ! docker run --rm "$image" php -n -r 'exit(PHP_ZTS ? 1 : 0);'; then
+		echo "::error::$image is not an NTS PHP"
+		status=1
+		continue
+	fi
 	set +e
 	out=$(docker run --rm \
 		-v "$module:/ext/phonetic.so:ro" \

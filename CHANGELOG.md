@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prebuilt PHP 8.6 binaries attached to releases: Linux (glibc x86_64 and
+  arm64), macOS (arm64), and Windows DLLs (x64 and x86, TS and NTS).
+
 ### Fixed
 
 - BMPM preserves the combining dot when lowercasing Turkish capital `İ`,
