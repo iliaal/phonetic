@@ -100,6 +100,9 @@ static zend_result bm_budget_charge_output(bm_budget *bud, size_t amt)
  * this threshold to avoid repeated long comparisons; small sets avoid allocations. */
 #define BM_FINAL_HASH_MIN_WORK 128
 
+/* Final phoneme sets up to this size are sorted by insertion. */
+#define BM_FINAL_INSERTION_SORT_MAX 32
+
 #define BMPM_MAX_INPUT PHONETIC_MAX_RULED_INPUT
 
 /* Keep in sync with phonetic.stub.php. Accuracy values must stay disjoint
@@ -683,6 +686,23 @@ static zend_result pb_apply(pbuilder *pb, const alt_t *alts, int na, int max, bm
 	int ai;
 	int done = 0;
 
+	/* One unrestricted alternative over at most max phonemes keeps every
+	 * phoneme and its languages, so extend the texts in place. */
+	if (na == 1 && alts[0].langs == LS_ANY && pb->n <= (size_t) max) {
+		for (li = 0; li < pb->n; li++) {
+			if (pb->a[li].langs == LS_NONE) break;
+		}
+		if (li == pb->n) {
+			for (li = 0; li < pb->n; li++) {
+				if (bm_budget_charge_work(bud, pb->a[li].tn + (size_t) alts[0].tn) == FAILURE) {
+					return FAILURE;
+				}
+			}
+			if (alts[0].tn) pb_append_all(pb, alts[0].t, (size_t) alts[0].tn);
+			return SUCCESS;
+		}
+	}
+
 	pb_init(&out);
 	for (li = 0; li < pb->n && !done; li++) {
 		for (ai = 0; ai < na; ai++) {
@@ -725,9 +745,17 @@ typedef struct {
 	int          *bk_cnt;    /* [nbk] */
 	int           nbk;
 	size_t        count;
+	int           ascii_bk[128];   /* bucket for ASCII code points, -1 if none */
 } ruleset_index;
 
 static ruleset_index *g_rs_index;   /* [bmpm_rulesets_count] */
+
+/* Ruleset index by [name type][rule type][slot], filled at MINIT with
+ * bm_find_ruleset_idx so lookups during encode skip the strcmp scan. */
+#define BM_RS_SLOT_ANY    0
+#define BM_RS_SLOT_COMMON 1
+#define BM_RS_SLOT_LANG0  2
+static int g_rs_lookup[3][3][BM_RS_SLOT_LANG0 + BMPM_CAP_LANGUAGES];
 
 static int bm_find_ruleset_idx(int nt, int rt, const char *lang)
 {
@@ -745,6 +773,12 @@ static int bm_find_ruleset_idx(int nt, int rt, const char *lang)
 static int rs_dispatch(const ruleset_index *ix, uint32_t c, int *off, int *cnt)
 {
 	int lo = 0, hi = ix->nbk - 1;
+	if (c < 128) {
+		int k = ix->ascii_bk[c];
+		if (k < 0) return 0;
+		*off = ix->bk_off[k]; *cnt = ix->bk_cnt[k];
+		return 1;
+	}
 	while (lo <= hi) {
 		int mid = (lo + hi) >> 1;
 		uint32_t v = ix->bk_cp[mid];
@@ -816,6 +850,7 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
                         int max, bm_budget *bud)
 {
 	pbuilder result;
+	pbuilder sub;   /* per-phoneme builder; its array is reused across phonemes */
 	size_t pi;
 
 	if (rs == NULL || rs->rules == NULL || rs->count == 0) {
@@ -823,6 +858,7 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
 	}
 
 	pb_init(&result);
+	pb_init(&sub);
 	/* Hash long or numerous phonemes; linear scans avoid per-text allocations
 	 * for small sets. Both paths union languages and sort once below. */
 	{
@@ -842,13 +878,13 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
 
 		for (pi = 0; pi < pb->n; pi++) {
 			phon_t *P = &pb->a[pi];
-			pbuilder sub;
 			int tn, i;
 			uint32_t stk[512];
 			uint32_t *tcp;
 			size_t si;
 
-			pb_init(&sub);
+			/* The previous phoneme's texts were moved to result or freed. */
+			sub.n = 0;
 			pb_seed(&sub, P->langs);
 
 			/* Phoneme text is ASCII, so bytes can be widened without UTF-8 decoding. */
@@ -915,6 +951,10 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
 
 				if (hit) {
 					hit->langs = ls_merge(hit->langs, np->langs);
+					if (np->t) {
+						efree(np->t);
+						np->t = NULL;
+					}
 				} else {
 					size_t idx = result.n;
 					/* Charge new distinct phonemes before allocation; all recursive leaves share bud. */
@@ -940,16 +980,30 @@ static zend_result bm_apply_final(pbuilder *pb, const bmpm_ruleset *rs, const ru
 					}
 				}
 			}
-			pb_free(&sub);
 		}
+		sub.n = 0;
+		pb_free(&sub);
 
 		if (hashed) {
 			zend_hash_destroy(&seen);
 		}
 	}
 
-	if (result.n > 1) {
+	if (result.n > BM_FINAL_INSERTION_SORT_MAX) {
 		qsort(result.a, result.n, sizeof(phon_t), bm_phon_qcmp);
+	} else {
+		/* Texts are distinct after the merge, so the order is total and any
+		 * sort yields the same sequence; insertion sort avoids qsort's setup. */
+		size_t k;
+		for (k = 1; k < result.n; k++) {
+			phon_t key = result.a[k];
+			size_t j = k;
+			while (j > 0 && bm_phon_qcmp(&result.a[j - 1], &key) > 0) {
+				result.a[j] = result.a[j - 1];
+				j--;
+			}
+			result.a[j] = key;
+		}
 	}
 
 	pb_free(pb);
@@ -1137,19 +1191,21 @@ static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp,
 static char *bm_encode_core(int nt, int rt, langset_t ls, langset_t forced,
                          const uint32_t *cp, int n, size_t *outlen, int depth, bm_budget *bud)
 {
-	const char *lang = "any";
 	const char *single;
+	int slot = BM_RS_SLOT_ANY;
 	const bmpm_ruleset *rules_main, *final1, *final2;
 	const ruleset_index *ix_main, *ix_f1, *ix_f2;
 	int i_main, i_f1, i_f2;
 	int tn;                  /* trimmed length */
 	const uint32_t *tcp;     /* trimmed code points */
 
-	if (ls_singleton_lang(nt, ls, &single)) lang = single;
+	if (ls_singleton_lang(nt, ls, &single)) {
+		slot = BM_RS_SLOT_LANG0 + ls_ctz(ls);
+	}
 
-	i_main = bm_find_ruleset_idx(nt, BMPM_RULES, lang);
-	i_f1 = bm_find_ruleset_idx(nt, rt, "common");
-	i_f2 = bm_find_ruleset_idx(nt, rt, lang);
+	i_main = g_rs_lookup[nt][BMPM_RULES][slot];
+	i_f1 = g_rs_lookup[nt][rt][BM_RS_SLOT_COMMON];
+	i_f2 = g_rs_lookup[nt][rt][slot];
 	rules_main = i_main < 0 ? NULL : &bmpm_rulesets[i_main];
 	final1 = i_f1 < 0 ? NULL : &bmpm_rulesets[i_f1];
 	final2 = i_f2 < 0 ? NULL : &bmpm_rulesets[i_f2];
@@ -1594,6 +1650,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 	ix->decoded = NULL; ix->arena = NULL; ix->order = NULL;
 	ix->bk_cp = NULL; ix->bk_off = NULL; ix->bk_cnt = NULL;
 	ix->nbk = 0; ix->count = rs->count;
+	for (k = 0; k < 128; k++) ix->ascii_bk[k] = -1;
 
 	if (rs->rules == NULL || rs->count == 0) return;
 
@@ -1653,6 +1710,7 @@ static void bm_build_ruleset_index(const bmpm_ruleset *rs, ruleset_index *ix)
 			if (ix->decoded[i].plen > 0 && ix->decoded[i].pat[0] == c) { ix->order[op++] = (int) i; cnt++; }
 		}
 		ix->bk_cnt[k] = cnt;
+		if (c < 128) ix->ascii_bk[c] = k;
 	}
 	pefree(firsts, 1);
 }
@@ -1698,6 +1756,20 @@ void bmpm_minit(void)
 	g_rs_index = pecalloc(bmpm_rulesets_count, sizeof(ruleset_index), 1);
 	for (i = 0; i < bmpm_rulesets_count; i++) {
 		bm_build_ruleset_index(&bmpm_rulesets[i], &g_rs_index[i]);
+	}
+	{
+		int nt, rt, k;
+		for (nt = BMPM_GEN; nt <= BMPM_SEP; nt++) {
+			const bmpm_language_list *l = bm_nt_langs(nt);
+			for (rt = BMPM_RULES; rt <= BMPM_RT_EXACT; rt++) {
+				g_rs_lookup[nt][rt][BM_RS_SLOT_ANY] = bm_find_ruleset_idx(nt, rt, "any");
+				g_rs_lookup[nt][rt][BM_RS_SLOT_COMMON] = bm_find_ruleset_idx(nt, rt, "common");
+				for (k = 0; k < BMPM_CAP_LANGUAGES; k++) {
+					g_rs_lookup[nt][rt][BM_RS_SLOT_LANG0 + k] = (l != NULL && (size_t) k < l->count)
+						? bm_find_ruleset_idx(nt, rt, l->languages[k]) : -1;
+				}
+			}
+		}
 	}
 	g_lang_index = pecalloc(bmpm_lang_sets_count, sizeof(langset_index), 1);
 	for (i = 0; i < bmpm_lang_sets_count; i++) {

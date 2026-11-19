@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- BMPM extends phonemes in place for rules with one alternative and no
+  language restriction, reuses one builder across each final pass, finds ASCII
+  rule buckets and rulesets through tables built at startup, and sorts final
+  sets of up to 32 phonemes by insertion. `bmpm()` and `bmpm_match()` take
+  10-23% less time on a list of Latin-script surnames (Linux x86-64; GCC 12
+  and 14, Clang 18). Encodings, matches, and budget errors are unchanged.
 - BMPM rule contexts are classified and parsed once at startup instead of on
   every candidate rule match, and language guessing tests a rule's required
   letters with one bitmask check. `bmpm()` and `bmpm_match()` take about
