@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Windows DLLs for PHP 8.6 (x64 and x86, TS and NTS) attached to releases.
+
 ### Fixed
 
 - BMPM preserves the combining dot when lowercasing Turkish capital `İ`,

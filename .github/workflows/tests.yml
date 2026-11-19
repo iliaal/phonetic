@@ -205,19 +205,23 @@ jobs:
             echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
           fi
 
-  # setup-php '8.6' resolves to a php-src master snapshot, not the PHP-8.6
-  # branch, so 8.6 is source-built (release mode) from the branch instead.
+  # The pinned setup-php release still serves 8.6 from its nightly channel, so
+  # 8.6 is source-built (release mode) from the checksum-pinned php.net
+  # tarball. php-src-sha256 is the php.net-published tar.xz SHA-256.
   linux-src:
-    name: PHP ${{ matrix.php }} - Linux (PHP-${{ matrix.php }} branch)
+    name: PHP ${{ matrix.php-src }} - Linux (php.net tarball)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.6']
+        include:
+          - php-src: '8.6.0'
+            php-src-sha256: 5f84beaa3d763aee1e4feed99bf54ec692c383b322e25626807b589238c3a087
 
     env:
-      PHP_VERSION: ${{ matrix.php }}
+      PHP_SRC: ${{ matrix.php-src }}
+      PHP_SRC_SHA256: ${{ matrix.php-src-sha256 }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -225,14 +229,17 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y re2c bison autoconf
+        run: sudo apt-get update && sudo apt-get install -y autoconf
 
-      - name: Build PHP from branch
+      - name: Build PHP from release tarball
         run: |
           set -euo pipefail
-          git clone --depth=1 --branch="PHP-${PHP_VERSION}" https://github.com/php/php-src.git /tmp/php-src
+          tarball="$RUNNER_TEMP/php-$PHP_SRC.tar.xz"
+          curl -fsSL --retry 3 -o "$tarball" "https://www.php.net/distributions/php-$PHP_SRC.tar.xz"
+          echo "$PHP_SRC_SHA256  $tarball" | sha256sum -c -
+          mkdir /tmp/php-src
+          tar -xJf "$tarball" -C /tmp/php-src --strip-components=1
           cd /tmp/php-src
-          ./buildconf --force
           ./configure \
             --disable-zts \
             --disable-all \
@@ -240,6 +247,7 @@ jobs:
             --prefix=/tmp/php-src-install
           make -j"$(nproc)"
           make install
+          test "$(/tmp/php-src-install/bin/php -n -r 'echo PHP_VERSION;')" = "$PHP_SRC"
 
       - name: Build extension
         run: |
@@ -442,9 +450,9 @@ jobs:
           fi
 
   # Mirrors the release-windows.yml matrix (same php-version-list, so the same
-  # MSVC toolsets: VS2019 for <=8.3, VS2022 for >=8.4) and runs the test suite,
-  # so a Windows compile/test break surfaces on push instead of at release time
-  # when the asset upload is all-or-nothing.
+  # MSVC toolsets: VS2019 for <=8.3, VS2022 for 8.4 and 8.5, VS2026 for 8.6)
+  # and runs the test suite, so a Windows compile/test break surfaces on push
+  # instead of at release time when the asset upload is all-or-nothing.
   windows-matrix:
     name: Resolve Windows matrix
     runs-on: ubuntu-latest
@@ -458,7 +466,7 @@ jobs:
       - id: matrix
         uses: php/php-windows-builder/extension-matrix@29352c0ef9e8ce65264ea9e287881a6f7758a953 # 1.9.0
         with:
-          php-version-list: '8.1, 8.2, 8.3, 8.4, 8.5'
+          php-version-list: '8.1, 8.2, 8.3, 8.4, 8.5, 8.6'
 
   windows:
     name: Windows ${{ matrix.php-version }} ${{ matrix.ts }} ${{ matrix.arch }}
