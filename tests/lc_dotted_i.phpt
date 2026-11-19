@@ -1,5 +1,5 @@
 --TEST--
-Turkish dotted capital I (U+0130) lowercases to plain i
+Turkish dotted capital I (U+0130): stable İstanbul and DM Soundex encodings
 --EXTENSIONS--
 phonetic
 --FILE--

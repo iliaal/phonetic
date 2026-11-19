@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- BMPM preserves the combining dot when lowercasing Turkish capital `İ`,
+  matching Commons Codec rule contexts and encodings (for example, `İhsan`).
+  `bmpm_match()` uses the corrected encoding; DM Soundex is unchanged.
+
 ### Performance
 
 - BMPM rule contexts are classified and parsed once at startup instead of on

@@ -115,9 +115,9 @@ static inline int ph_u8_encode_cp(uint32_t cp, char *buf)
 	return 4;
 }
 
-/* Java lowercase mappings for the supported Latin ranges.
- * U+0130 maps to 'i', not its adjacent U+0131 (dotless i). Java's string
- * lowercase adds U+0307, which matches no phonetic rule and can be dropped. */
+/* Point-wise lowercase mappings for the supported Latin ranges.
+ * U+0130 maps to 'i', not its adjacent U+0131 (dotless i). BMPM separately
+ * preserves Java string lowercase's U+0307 expansion for rule contexts. */
 static inline uint32_t ph_lc_latin(uint32_t c)
 {
 	if (c >= 'A' && c <= 'Z') return c + 32;

@@ -1285,16 +1285,27 @@ static char *bm_encode_sub(int nt, int rt, langset_t forced, const uint32_t *cp,
 	return bm_encode_core(nt, rt, ls, forced, cp, n, outlen, depth, bud);
 }
 
-/* Guess before trimming or mapping hyphens, matching Lang.guessLanguages. */
+/* Expand dotted capital I to i + combining dot before language guessing and
+ * rule contexts, matching Java string lowercase. Guess before trimming or
+ * mapping hyphens, matching Lang.guessLanguages. */
 static char *bm_encode_string(int nt, int rt, langset_t forced, const char *input, size_t len, size_t *outlen, bm_budget *bud)
 {
-	int n, i;
+	int n, i, extra = 0, end;
 	uint32_t *cp = ph_u8_decode(input, len, &n);
 	langset_t ls;
 	char *out;
 
 	bud->output_limit = len * BMPM_MAX_OUTPUT_RATIO;
-	for (i = 0; i < n; i++) cp[i] = bm_lc_cp(cp[i]);
+	for (i = 0; i < n; i++) if (cp[i] == 0x0130) extra++;
+	end = n + extra;
+	/* ph_u8_decode reserves len + 1 slots. Each two-byte U+0130 needs two
+	 * slots after expansion; writing backwards preserves unread code points. */
+	for (i = n - 1; i >= 0; i--) {
+		uint32_t c = cp[i];
+		if (c == 0x0130) cp[--end] = 0x0307;
+		cp[--end] = bm_lc_cp(c);
+	}
+	n += extra;
 	ls = forced != LS_NONE ? forced : bm_guess_languages(nt, cp, n, bud);
 	if (ls == LS_NONE) {
 		efree(cp);
