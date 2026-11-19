@@ -1,0 +1,81 @@
+name: PHP master (advisory)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-master-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  php-master:
+    name: PHP 8.7 (master, advisory)
+    runs-on: ubuntu-latest
+    # php-src master changes without notice; a failure here is an early
+    # warning, not a merge gate.
+    continue-on-error: true
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@3c21e10268bafaf84c59e8f4e65b39acacb62ca4 # main # zizmor: ignore[stale-action-refs,ref-version-mismatch]
+        with:
+          php-version: '8.7'
+          tools: phpize, php-config
+
+      - name: Show PHP version
+        run: php -v
+
+      - name: Build extension
+        run: |
+          # --enable-phonetic-dev sets -Werror, so any warning fails this step.
+          set -euo pipefail
+          phpize
+          ./configure --enable-phonetic --enable-phonetic-dev
+          make -j"$(nproc)"
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          TEST_PHP_EXECUTABLE=$(which php)
+          export TEST_PHP_EXECUTABLE
+          TEST_PHP_ARGS="-d extension=$(pwd)/modules/phonetic.so"
+          export TEST_PHP_ARGS
+          export NO_INTERACTION=1
+          # Every .phpt has `--EXTENSIONS-- phonetic`, so a load failure SKIPs the
+          # whole suite and run-tests still exits 0. Assert the extension loads,
+          # then fail on any skip/bork/leak/failure or an empty pass count.
+          php -d "extension=$(pwd)/modules/phonetic.so" -r 'exit(extension_loaded("phonetic") ? 0 : 1);' \
+            || { echo "::error::phonetic extension failed to load"; exit 1; }
+          TEST_STATUS=0
+          RESULT=$(php run-tests.php --show-diff -g FAIL,BORK,LEAK,XLEAK tests/ 2>&1) || TEST_STATUS=$?
+          echo "$RESULT"
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::test runner exited with status $TEST_STATUS"; exit "$TEST_STATUS"
+          fi
+          # Portable parse: BSD grep (macOS) has no -P/\K, so grep -oP would
+          # yield empty counts and trip the "not effective" guard on a good run.
+          num() { awk -v k="$1" '$0 ~ ("^Tests " k) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }' <<<"$RESULT"; }
+          PASSED=$(num passed); FAILED=$(num failed); SKIPPED=$(num skipped)
+          BORKED=$(num borked); LEAKED=$(num leaked)
+          : "${PASSED:=0}" "${FAILED:=0}" "${SKIPPED:=0}" "${BORKED:=0}" "${LEAKED:=0}"
+          echo "passed=$PASSED failed=$FAILED skipped=$SKIPPED borked=$BORKED leaked=$LEAKED"
+          if [ "$FAILED" -gt 0 ] || [ "$BORKED" -gt 0 ] || [ "$LEAKED" -gt 0 ]; then
+            echo "::error::failed=$FAILED borked=$BORKED leaked=$LEAKED"; exit 1
+          fi
+          if [ "$PASSED" -eq 0 ] || [ "$SKIPPED" -gt 0 ]; then
+            echo "::error::suite not effective: passed=$PASSED skipped=$SKIPPED"; exit 1
+          fi
