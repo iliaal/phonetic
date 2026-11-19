@@ -73,6 +73,9 @@ jobs:
           - ubuntu-24.04
           - ubuntu-24.04-arm
           - macos-15
+        # 8.6 is absent: official php:8.6 images are ZTS-only, so the Linux
+        # gate has no NTS 8.6 image, and setup-php's macOS 8.6 (Homebrew)
+        # predates the 8.6.0 tag.
         php: ['8.4', '8.5']
         # php-src: the oldest patch release of the minor, which the
         # binaries are built against. Hashes are the php.net-published
@@ -123,7 +126,8 @@ jobs:
           persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        # setup-php main until a release marks PHP 8.6 stable; return to a tagged release then.
+        uses: shivammathur/setup-php@292f25acb388a711c0c758f382e5c3109a391dd7 # main # zizmor: ignore[stale-action-refs,ref-version-mismatch]
         with:
           php-version: ${{ matrix.php }}
           tools: phpize
