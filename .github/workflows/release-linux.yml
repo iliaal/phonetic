@@ -18,6 +18,15 @@ name: Release Linux & macOS binaries
 # newest patch image, and macOS loads it on the oldest-patch build PHP and
 # on setup-php's.
 #
+# PHP 8.6 differs on both sides. The official php:8.6 images are
+# thread-safe by design (docker-library/php#1686) with no NTS variant, so
+# the Linux gate image is NTS PHP built from the checksum-pinned tarball
+# inside the digest-pinned debian:bookworm-slim base and committed as a
+# local image. setup-php's macOS 8.6 is Homebrew's php@8.6, which builds a
+# php-src snapshot older than the 8.6.0 tag, so macOS 8.6 skips setup-php
+# and tests on the 8.6.0 build PHP. Both stand in for the oldest and the
+# newest patch until 8.6.1 ships.
+#
 # workflow_dispatch builds and gates on each OS/arch as a pre-tag
 # validation gate; with a blank release_tag it is build-and-gate only and
 # safe to run against a branch. A release_tag also uploads the gated
@@ -73,10 +82,7 @@ jobs:
           - ubuntu-24.04
           - ubuntu-24.04-arm
           - macos-15
-        # 8.6 is absent: official php:8.6 images are ZTS-only, so the Linux
-        # gate has no NTS 8.6 image, and setup-php's macOS 8.6 (Homebrew)
-        # predates the 8.6.0 tag.
-        php: ['8.4', '8.5']
+        php: ['8.4', '8.5', '8.6']
         # php-src: the oldest patch release of the minor, which the
         # binaries are built against. Hashes are the php.net-published
         # tar.xz SHA-256s. oldest-image/newest-image: official images (via
@@ -84,7 +90,9 @@ jobs:
         # loads each binary on, pinned by index digest. The gate pulls the
         # same digest from ghcr.io/iliaal/php first and falls back to ECR
         # Public, mirror.gcr.io, and Docker Hub. Move newest-image to each
-        # new patch release.
+        # new patch release. base-image (8.6 only): the digest-pinned
+        # bookworm-slim base the NTS gate image is built in; oldest-image and
+        # newest-image then name that local image.
         include:
           - php: '8.4'
             php-src: '8.4.1'
@@ -96,6 +104,12 @@ jobs:
             php-src-sha256: 39cb6e4acd679b574d3d3276f148213e935fc25f90403eb84fb1b836a806ef1e
             oldest-image: public.ecr.aws/docker/library/php:8.5.0-cli@sha256:fb551f94cba4698612c90158aa7d4fe8e1a5355f9c444d0f90929d366fc75b36
             newest-image: public.ecr.aws/docker/library/php:8.5.12-cli@sha256:635a4b998025ab269194639a5549c6fdcd9b4f88ec8cd761b092de8653d40663
+          - php: '8.6'
+            php-src: '8.6.0'
+            php-src-sha256: 5f84beaa3d763aee1e4feed99bf54ec692c383b322e25626807b589238c3a087
+            base-image: public.ecr.aws/docker/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+            oldest-image: phonetic-php:8.6.0-cli-nts
+            newest-image: phonetic-php:8.6.0-cli-nts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,6 +140,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup PHP
+        if: runner.os != 'macOS' || matrix.php != '8.6'
         # setup-php main until a release marks PHP 8.6 stable; return to a tagged release then.
         uses: shivammathur/setup-php@292f25acb388a711c0c758f382e5c3109a391dd7 # main # zizmor: ignore[stale-action-refs,ref-version-mismatch]
         with:
@@ -152,7 +167,8 @@ jobs:
           git clean -xdf .
 
       # Kept off PATH: phpize and php-config are called by absolute path,
-      # and `php` stays setup-php's for the test suite.
+      # and `php` stays setup-php's for the test suite (macOS 8.6 excepted,
+      # see the next step).
       - name: Build PHP ${{ matrix.php-src }} headers and binary
         env:
           PHP_SRC: ${{ matrix.php-src }}
@@ -171,6 +187,10 @@ jobs:
           make -j"$(getconf _NPROCESSORS_ONLN)" >"$RUNNER_TEMP/php-make.log" 2>&1 \
             || { tail -50 "$RUNNER_TEMP/php-make.log"; exit 1; }
           make install >/dev/null
+
+      - name: Test on the build PHP (macOS 8.6)
+        if: runner.os == 'macOS' && matrix.php == '8.6'
+        run: echo "$RUNNER_TEMP/php/bin" >> "$GITHUB_PATH"
 
       - name: Verify build and test PHP
         env:
@@ -283,6 +303,49 @@ jobs:
             fi
           done
           exit "$status"
+
+      - name: Build NTS PHP ${{ matrix.php-src }} gate image (Linux)
+        if: runner.os == 'Linux' && matrix.base-image != ''
+        env:
+          PHP_SRC: ${{ matrix.php-src }}
+          PHP_SRC_SHA256: ${{ matrix.php-src-sha256 }}
+          BASE_IMAGE: ${{ matrix.base-image }}
+          GATE_IMAGE: ${{ matrix.oldest-image }}
+          # PHPIZE_DEPS of the Docker official php images.
+          PHPIZE_DEPS: autoconf dpkg-dev file g++ gcc libc-dev make pkg-config re2c
+        run: |
+          set -euo pipefail
+          path=${BASE_IMAGE#public.ecr.aws/docker/library/}
+          base=""
+          for candidate in "$BASE_IMAGE" "mirror.gcr.io/library/$path" "docker.io/library/$path"; do
+            for attempt in 1 2 3; do
+              if docker pull -q "$candidate"; then base=$candidate; break 2; fi
+              sleep $((attempt * 5))
+            done
+          done
+          test -n "$base" || { echo "::error::could not pull $BASE_IMAGE"; exit 1; }
+          tarball="$RUNNER_TEMP/php-$PHP_SRC.tar.xz"
+          echo "$PHP_SRC_SHA256  $tarball" | shasum -a 256 -c -
+          src="$RUNNER_TEMP/php-src-nts"
+          mkdir "$src"
+          tar -xJf "$tarball" -C "$src" --strip-components=1
+          # CFLAGS, CPPFLAGS, and LDFLAGS match the Docker official php images.
+          docker run --name php-nts-build -v "$src:/php-src" -w /php-src \
+            -e PHPIZE_DEPS -e PHP_SRC "$base" \
+            bash -euo pipefail -c '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends ${PHPIZE_DEPS} >/dev/null
+              export CFLAGS="-fstack-protector-strong -fpic -fpie -O2 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64"
+              export CPPFLAGS="${CFLAGS}" LDFLAGS="-Wl,-O1 -pie"
+              ./configure --prefix=/usr/local --disable-all --enable-cli \
+                --disable-cgi --disable-phpdbg --without-pear >/dev/null
+              make -j"$(nproc)" >/dev/null
+              make install >/dev/null
+              test "$(php -n -r "echo PHP_VERSION;")" = "${PHP_SRC}"
+              php -n -r "exit(PHP_ZTS ? 1 : 0);"
+            '
+          docker commit php-nts-build "$GATE_IMAGE" >/dev/null
+          docker rm php-nts-build >/dev/null
 
       - name: Gate on the oldest and newest patch (Linux)
         if: runner.os == 'Linux'

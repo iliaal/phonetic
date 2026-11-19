@@ -14,5 +14,5 @@ build_matrix:                             # php-install-PHP-* present; floor is 
 configure_base: "--enable-phonetic --enable-phonetic-dev"
 smoke_test: scripts/pie-smoke.sh
 windows_ci: true                          # .github/workflows/release-windows.yml present
-linux_prebuilt: true                      # .github/workflows/release-linux.yml ships Linux x86_64+arm64, macOS arm64 (PHP 8.4+8.5)
+linux_prebuilt: true                      # .github/workflows/release-linux.yml ships Linux x86_64+arm64, macOS arm64 (PHP 8.4+8.5+8.6; macOS 8.6 tests on the 8.6.0 tarball build)
 asan_test: true                           # asan job in .github/workflows/tests.yml
