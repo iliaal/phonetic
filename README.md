@@ -180,10 +180,15 @@ match_rating_compare("Catherine", "Kathryn");     // true
 
 For indexed lookup, store encoded keys where equality or intersection preserves
 the match you want. Index non-empty NYSIIS keys and all non-empty Double
-Metaphone keys; use the Double Metaphone helper if you need match strength.
-For BMPM, index individual tokens with matching encoder options, not the
-entire string: ordinary words are concatenated, while recognized generic
-prefixes produce `(remainder)-(combined)` groups.
+Metaphone keys. Use the same `max_length` at indexing and lookup and when
+calling the corresponding comparison helper (defaults: 6 for NYSIIS, 4 for
+Double Metaphone). Use the Double Metaphone helper if you need match strength.
+
+For BMPM, use the same `name_type`, `accuracy`, and `language` for indexing,
+lookup and comparison, including an empty language for auto-detection.
+Index individual tokens, not the entire string: ordinary words are
+concatenated, while recognized generic prefixes produce
+`(remainder)-(combined)` groups.
 
 Match Rating codex equality is not a recall-preserving filter: `"Catherine"`
 and `"Kathryn"` compare true with different codexes (`CTHRN` and `KTHRYN`).
