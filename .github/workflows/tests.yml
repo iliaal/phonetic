@@ -213,9 +213,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux range minus 8.6: Homebrew's php@8.6 builds a php-src snapshot
-        # older than the 8.6.0 tag. ZTS remains Windows-only.
-        php: ['8.1', '8.2', '8.3', '8.4', '8.5']
+        # Homebrew's php@8.6 builds a php-src snapshot older than the 8.6.0
+        # tag, so 8.6 tests on PHP built from the checksum-pinned 8.6.0
+        # tarball, as release-linux.yml's macOS 8.6 lane does. ZTS remains
+        # Windows-only.
+        php: ['8.1', '8.2', '8.3', '8.4', '8.5', '8.6']
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -223,10 +225,37 @@ jobs:
           persist-credentials: false
 
       - name: Setup PHP
+        if: matrix.php != '8.6'
         uses: shivammathur/setup-php@3c21e10268bafaf84c59e8f4e65b39acacb62ca4 # main # zizmor: ignore[stale-action-refs,ref-version-mismatch]
         with:
           php-version: ${{ matrix.php }}
           tools: phpize, php-config
+
+      - name: Build PHP 8.6.0
+        if: matrix.php == '8.6'
+        env:
+          PHP_SRC: '8.6.0'
+          PHP_SRC_SHA256: 5f84beaa3d763aee1e4feed99bf54ec692c383b322e25626807b589238c3a087
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          set -euo pipefail
+          # phpize needs autoconf. The other lanes get it as a dependency of
+          # setup-php's Homebrew PHP; the runner image does not ship it.
+          brew install autoconf
+          tarball="$RUNNER_TEMP/php-$PHP_SRC.tar.xz"
+          curl -fsSL --retry 3 -o "$tarball" "https://www.php.net/distributions/php-$PHP_SRC.tar.xz"
+          echo "$PHP_SRC_SHA256  $tarball" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/php-src"
+          tar -xJf "$tarball" -C "$RUNNER_TEMP/php-src" --strip-components=1
+          cd "$RUNNER_TEMP/php-src"
+          ./configure --prefix="$RUNNER_TEMP/php" --disable-all --enable-cli \
+            --disable-cgi --disable-phpdbg --without-pear >"$RUNNER_TEMP/php-configure.log"
+          make -j"$(sysctl -n hw.ncpu)" >"$RUNNER_TEMP/php-make.log" 2>&1 \
+            || { tail -50 "$RUNNER_TEMP/php-make.log"; exit 1; }
+          make install >/dev/null
+          test "$("$RUNNER_TEMP/php/bin/php" -n -r 'echo PHP_VERSION;')" = "$PHP_SRC"
+          echo "$RUNNER_TEMP/php/bin" >> "$GITHUB_PATH"
 
       - name: Build extension
         run: |
