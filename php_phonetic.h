@@ -15,7 +15,7 @@
 
 #include "php.h"
 
-#define PHP_PHONETIC_VERSION "0.4.6"
+#define PHP_PHONETIC_VERSION "0.5.0"
 
 /* Shared security bound for the branching rule engines (BMPM + DM Soundex).
  * Both public encode and match entry points reject longer inputs with ValueError. */

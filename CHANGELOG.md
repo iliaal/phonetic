@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-20
+
 ### Added
 
 - Prebuilt PHP 8.6 binaries attached to releases: Linux (glibc x86_64 and
@@ -367,7 +369,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bmpm()`: pre-decode rule contexts at load, skip language-guess rules whose
   required literals are absent, and small-string-optimize phoneme text (~24% faster).
 
-[Unreleased]: https://github.com/iliaal/phonetic/compare/0.4.6...HEAD
+[Unreleased]: https://github.com/iliaal/phonetic/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/iliaal/phonetic/releases/tag/0.5.0
 [0.4.6]: https://github.com/iliaal/phonetic/releases/tag/0.4.6
 [0.4.5]: https://github.com/iliaal/phonetic/releases/tag/0.4.5
 [0.4.4]: https://github.com/iliaal/phonetic/releases/tag/0.4.4
