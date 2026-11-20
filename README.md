@@ -25,14 +25,14 @@ bmpm_match("Peterson", "Petersen");                // true
 | | Double Metaphone | BMPM | Daitch-Mokotoff Soundex | NYSIIS | Match Rating |
 |---|---|---|---|---|---|
 | Output | primary + alternate key | language-aware token set | distinct 6-digit codes | single key | compact codex |
-| Two names match when | keys are equal | token sets intersect | code sets intersect | keys are equal | clear the MRA similarity threshold |
+| Two names match when | non-empty primary or alternate keys overlap | token sets intersect | code sets intersect and both names were encodable | non-empty keys are equal | the MRA comparator accepts the pair |
 | Strongest for | English and general Latin-script names | cross-language and transliteration variants (Slavic, Germanic, Hebrew, Romance) | Eastern-European and Ashkenazi surnames, genealogy | American/English surnames | English names; ships its own similarity test |
 | Spelling-variant recall | good | highest | high, within its language model | good | good |
 | Ambiguity handling | up to 2 keys | many tokens | multiple codes | single key | single codex |
 | Relative speed | fast (1.0x) | slowest (~60x) | middle (~2.3x) | fast (0.42x) | fastest (0.24x) |
 | Data source | clean-room published algorithm | Apache Commons Codec rule data | Apache Commons Codec rule data | clean-room published algorithm | clean-room published algorithm |
 
-Use Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy, where it is the field standard. NYSIIS and Match Rating Approach are lighter single-key English/American encoders, useful as alternate index keys or as a second check alongside Double Metaphone.
+Use Double Metaphone as a fast general-purpose default, BMPM when names cross languages or scripts, and Daitch-Mokotoff for Eastern-European and Jewish genealogy, where it is the field standard. NYSIIS is a lighter single-key English/American encoder. Match Rating Approach is another lightweight option, but its codex is not an equality key for its comparator.
 
 ## API
 
@@ -100,7 +100,7 @@ dm_soundex("");                            // []  (API: empty list, not ["000000
 
 For an empty string, this API returns `[]` instead of Commons Codec's `["000000"]`. Non-empty input that matches no rule still returns `["000000"]` for encoder parity with the oracle. Inputs over 4096 bytes or encodings that exceed the work budget throw `ValueError`.
 
-Indexing caveat: `"000000"` is also the finished code for pure-vowel inputs that did match a rule (e.g. `"A"`), so two `"000000"` encodings don't imply a match. `dm_soundex_match("A", "1")` is `false` although both encode to `["000000"]`. When you build an inverted index from `dm_soundex()`, skip the `"000000"` key or use `dm_soundex_match()` at query time.
+Indexing caveat: `"000000"` is also the finished code for pure-vowel inputs that did match a rule (e.g. `"A"`), so two `"000000"` encodings don't imply a match. `dm_soundex_match("A", "1")` is `false` although both encode to `["000000"]`. Skipping `"000000"` avoids false positives from that bucket but also drops true matches such as `"A"`/`"E"`. To retain those hits, keep the original names and check candidates sharing that code with `dm_soundex_match()` instead of accepting or discarding the whole bucket.
 
 ### NYSIIS
 
@@ -178,14 +178,28 @@ bmpm_match("Peterson", "Petersen");               // true
 match_rating_compare("Catherine", "Kathryn");     // true
 ```
 
-For indexed lookup, encode once and store the key(s) with each record, then query by encoded value instead of re-encoding at search time. Double Metaphone gives one or two keys per name; Daitch-Mokotoff and BMPM give a set, so index every code. BMPM separates alternatives with `|`; ordinary words are concatenated, while recognized generic prefixes produce `(remainder)-(combined)` groups:
+For indexed lookup, store encoded keys where equality or intersection preserves
+the match you want. Index non-empty NYSIIS keys and all non-empty Double
+Metaphone keys; use the Double Metaphone helper if you need match strength.
+For BMPM, index individual tokens with matching encoder options, not the
+entire string: ordinary words are concatenated, while recognized generic
+prefixes produce `(remainder)-(combined)` groups.
+
+Match Rating codex equality is not a recall-preserving filter: `"Catherine"`
+and `"Kathryn"` compare true with different codexes (`CTHRN` and `KTHRYN`).
+To preserve comparator recall, compare every record, or use a candidate
+selection method that includes all pairs the comparator can accept.
+
+The Daitch-Mokotoff example indexes every non-sentinel code. It deliberately
+trades away matches that only share `"000000"`; use the comparison path
+described above if those matches matter:
 
 ```php
-// Build a phonetic index, then look up by shared code
+// Build a Daitch-Mokotoff index, then look up by shared non-sentinel code
 $index = [];
 foreach ($records as $id => $name) {
     foreach (dm_soundex($name) as $code) {
-        // Skip the dual-purpose "000000" sentinel (unencodable *and* pure vowels).
+        // Skipping "000000" avoids false hits but loses true vowel-only matches.
         if ($code === "000000") {
             continue;
         }
@@ -235,7 +249,7 @@ The comparison helpers cost roughly two encodes plus a cheap compare:
 | `dm_soundex_match()` | ~0.80 µs | ~1.3M/sec |
 | `bmpm_match()` | ~22 µs | ~45k/sec |
 
-For repeated lookups against a fixed corpus, encode once and index the keys (see [Usage](#usage)) rather than calling a helper per candidate pair.
+For repeated lookups against a fixed corpus, index keys where that preserves the intended match. Use the [Usage](#usage) guidance to retain comparison checks and avoid dropping valid candidates.
 
 ## Notes and limitations
 
