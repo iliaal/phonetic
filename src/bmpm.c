@@ -755,7 +755,7 @@ static ruleset_index *g_rs_index;   /* [bmpm_rulesets_count] */
 #define BM_RS_SLOT_ANY    0
 #define BM_RS_SLOT_COMMON 1
 #define BM_RS_SLOT_LANG0  2
-static int g_rs_lookup[3][3][BM_RS_SLOT_LANG0 + BMPM_CAP_LANGUAGES];
+static int g_rs_lookup[BMPM_NAME_TYPES][BMPM_RULE_TYPES][BM_RS_SLOT_LANG0 + BMPM_CAP_LANGUAGES];
 
 static int bm_find_ruleset_idx(int nt, int rt, const char *lang)
 {
@@ -1759,9 +1759,9 @@ void bmpm_minit(void)
 	}
 	{
 		int nt, rt, k;
-		for (nt = BMPM_GEN; nt <= BMPM_SEP; nt++) {
+		for (nt = BMPM_GEN; nt < BMPM_NAME_TYPES; nt++) {
 			const bmpm_language_list *l = bm_nt_langs(nt);
-			for (rt = BMPM_RULES; rt <= BMPM_RT_EXACT; rt++) {
+			for (rt = BMPM_RULES; rt < BMPM_RULE_TYPES; rt++) {
 				g_rs_lookup[nt][rt][BM_RS_SLOT_ANY] = bm_find_ruleset_idx(nt, rt, "any");
 				g_rs_lookup[nt][rt][BM_RS_SLOT_COMMON] = bm_find_ruleset_idx(nt, rt, "common");
 				for (k = 0; k < BMPM_CAP_LANGUAGES; k++) {
