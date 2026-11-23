@@ -58,8 +58,8 @@
 #define BMPM_CAP_GUESS_CPS    128
 #define BMPM_CAP_LANGUAGES    31
 
-enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2 };
-enum bmpm_rule_type { BMPM_RULES = 0, BMPM_RT_APPROX = 1, BMPM_RT_EXACT = 2 };
+enum bmpm_name_type { BMPM_GEN = 0, BMPM_ASH = 1, BMPM_SEP = 2, BMPM_NAME_TYPES };
+enum bmpm_rule_type { BMPM_RULES = 0, BMPM_RT_APPROX = 1, BMPM_RT_EXACT = 2, BMPM_RULE_TYPES };
 
 typedef struct {
     const char *pattern;
