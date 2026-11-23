@@ -1375,7 +1375,7 @@ static char *bm_encode_string(int nt, int rt, langset_t forced, const char *inpu
 
 static int bm_validate_name_type(zend_long name_type, uint32_t arg_num)
 {
-	if (name_type != BMPM_GEN && name_type != BMPM_ASH && name_type != BMPM_SEP) {
+	if (name_type < BMPM_GEN || name_type >= BMPM_NAME_TYPES) {
 		zend_argument_value_error(arg_num, "must be one of BMPM_GENERIC, BMPM_ASHKENAZI, or BMPM_SEPHARDIC");
 		return FAILURE;
 	}
